@@ -4,8 +4,10 @@ import operator
 from collections import defaultdict
 import cPickle as pickle
 
+import numpy as np
+
 from itertools import product, combinations
-from future.builtins import dict #So dict.keys/values/items are memory efficient
+# from future.builtins import dict #So dict.keys/values/items are memory efficient
 import time
 
 def string_hamming_distance(str1, str2):
@@ -161,6 +163,17 @@ def to_fastq_lines(bc, umi, seq, qual):
     """
     return '@'+bc+':'+umi+'\n'+seq+'\n+\n'+qual+'\n'
 
+def from_fastq(handle):
+    while True:
+        name = next(handle).rstrip()[1:] #Read name
+        seq = next(handle).rstrip() #Read seq
+        next(handle) #+ line
+        qual = next(handle).rstrip() #Read qual
+        if not name or not seq or not qual:
+            break
+        yield name, seq, qual
+
+
 def run(paths, keep_barcodes=[]):
     #Prepare data collection
     barcode_read_counter = defaultdict(int)
@@ -194,6 +207,72 @@ def run(paths, keep_barcodes=[]):
     #Do something with results
     with open(paths['barcode_read_counts'], 'w') as f:
         pickle.dump(dict(barcode_read_counter), f)
+
+def barcode_histogram(paths):
+    with open(paths['barcode_read_counts'], 'r') as f:
+        barcode_read_counter = pickle.load(f)
+
+    count_freq = defaultdict(int)
+    for bc, count in barcode_read_counter.items():
+        count_freq[count] += 1
+
+    x = np.array(count_freq.keys())
+    y = np.array(count_freq.values())
+    w = x*y
+
+    import matplotlib.pyplot as plt
+    ax = plt.subplot(111)
+    ax.hist(x, bins=np.logspace(0, 6, 50), weights=w)
+    ax.set_xscale('log')
+    ax.set_xlabel('Reads per barcode')
+    ax.set_ylabel('#reads coming from bin')
+    plt.savefig('reads_by_barcode_bin.png')
+
+def good_barcode_list(paths, threshold=15000):
+    with open(paths['barcode_read_counts'], 'r') as f:
+        barcode_read_counter = pickle.load(f)
+
+    good_barcodes = []
+    for bc, count in barcode_read_counter.items():
+        if count >= threshold:
+            good_barcodes.append(bc)
+
+    barcode_names = {}
+    for i, bc in enumerate(sorted(good_barcodes, key=lambda b: barcode_read_counter[bc], reverse=True)):
+        barcode_names[bc] = 'bc%d' % (i+1)
+
+    with open(paths['good_barcodes_with_names'], 'w') as f:
+        pickle.dump(barcode_names, f)
+
+def split_reads_by_barcode(paths):
+    with open(paths['good_barcodes_with_names'], 'r') as f:
+        barcode_names = pickle.load(f)
+
+    i = 0
+    j = 0
+    pre_write = defaultdict(list)
+
+    with open(paths['filtered_fastq'], 'r') as input_fastq:
+        for name, seq, qual in from_fastq(input_fastq):
+            i += 1
+            bc, umi = name.split(':')
+            if bc in barcode_names:
+                j += 1
+                bc_name = barcode_names[bc]
+                filename = os.path.join(paths['barcode_dir'], '%s.fastq' % bc_name)
+                pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
+                if j % 1000000 == 0:
+                    for fn, chunks in pre_write.items():
+                        with open(fn, 'a') as out:
+                            for chunk in chunks:
+                                out.write(chunk)
+                    j = 0
+                    pre_write = defaultdict(list)
+
+    for fn, chunks in pre_write.items():
+        with open(fn, 'a') as out:
+            for chunk in chunks:
+                out.write(chunk)
 
 
 def run_multithreaded(paths):
@@ -380,7 +459,9 @@ if __name__=="__main__":
             'r2_input': os.path.join(base_dir, 'test.R2.fastq.aa.gz'),
             'input_filetype': 'gz',
             'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'),
+            'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'),
             'filtered_fastq': os.path.join(base_dir, 'test.filtered.fastq'),
+            'barcode_dir': os.path.join(base_dir, 'barcodes'),
             'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
             'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
         }
@@ -393,10 +474,20 @@ if __name__=="__main__":
             'r2_input': os.path.join(base_dir, 'S6D13-100_S0.R2.fastq.gz'),
             'input_filetype': 'gz',
             'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'),
+            'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'),
             'filtered_fastq': os.path.join(base_dir, 'S6D13-100.filtered.fastq'),
+            'barcode_dir': os.path.join(base_dir, 'barcodes'),
             'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
             'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
         }
+
+    with open(paths['barcode_read_counts'], 'r') as f:
+        barcode_counts = pickle.load(f)
+    with open(paths['good_barcodes_with_names'], 'r') as f:
+        barcode_names = pickle.load(f)
+
+    for bc, name in barcode_names.items():
+        print(bc, name, barcode_counts[bc])
 
     # paths = {
     #     'r1_input': os.path.join(base_dir, 'S6D13-100.R1.fastq.aa.gz'),
@@ -407,6 +498,7 @@ if __name__=="__main__":
     #     'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
     # }
 
-    run(paths)
+    # run(paths)
     # run_multiprocess(paths)
-
+    # good_barcode_list(paths, 15000)
+    # split_reads_by_barcode(paths)
