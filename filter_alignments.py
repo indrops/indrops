@@ -235,15 +235,10 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
 
 if __name__=="__main__":
-    # x=get_chromosome_kdtree('ucsc_genes.txt')
-    # print(x['chr1'].query((328400,)))
-
-    # print(len(x))
     import sys, argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
     parser.add_argument('--counts', type=argparse.FileType('w'))
     args = parser.parse_args()
-
     run(args.m, args.d, args.counts)

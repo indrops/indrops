@@ -19,7 +19,7 @@ ref = '/Users/averes/Projects/Melton/mm10_transcriptome_reindex/mm10_refseq_anno
 
 
 # RUN FOR TEST FILES
-input_filename = 'killme.fq'
+input_filename = '/Users/averes/Projects/Melton/temp_dropseq/killme.fq'
 p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -a --best --strata --sam --norc' % (ref, input_filename), stdout=subprocess.PIPE, shell=True)
 # p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -k 200 --sam' % (ref, input_filename), stdout=subprocess.PIPE, shell=True)
 p2 = subprocess.Popen('/Users/averes/miniconda3/envs/py27/bin/python filter_alignments.py --counts killme.counts > killme.bam',  stdin=p1.stdout, shell=True)
