@@ -29,7 +29,6 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
         unique = True
         rescued_non_unique = False
-        failed_tx_threshold = False
         failed_m_threshold = False
 
         if 1 < len(genes):
@@ -45,8 +44,6 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
                 genes = close_genes
                 if len(close_genes) == 1:
                     rescued_non_unique = True
-            else:
-                failed_tx_threshold = True
 
         #Choose 1 alignment per gene to output.
         chosen_alignments = {}
@@ -58,7 +55,7 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
         else:
             failed_m_threshold = True
 
-        read_filter_status = (unique, rescued_non_unique, failed_m_threshold, failed_tx_threshold)
+        read_filter_status = (unique, rescued_non_unique, failed_m_threshold)
         return chosen_alignments, read_filter_status
 
     # --------------------------
@@ -70,7 +67,6 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
     rescued_count = 0
     non_uniq_count = 0
     failed_m_count = 0
-    failed_tx_count = 0
 
     current_read = None
     read_alignments = []
@@ -96,10 +92,9 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
                     reads_by_umi[umi][seq] = chosen_alignments
 
                 uniq_count += processing_stats[0]
-                non_uniq_count += not(processing_stats[0])
+                non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
                 rescued_count += processing_stats[1]
                 failed_m_count += processing_stats[2]
-                failed_tx_count += processing_stats[3]
 
             #We reset the current read info
             current_read = alignment.qname
@@ -109,8 +104,16 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
     else:
         #We might have left-over alignments when we are done 
-        process_read_alignments(read_alignments)
+        chosen_alignments, processing_stats = process_read_alignments(read_alignments)
+        if chosen_alignments:
+                    umi = current_read.split(':')[4]
+                    seq = read_alignments[0].seq
+                    reads_by_umi[umi][seq] = chosen_alignments
 
+        uniq_count += processing_stats[0]
+        non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
+        rescued_count += processing_stats[1]
+        failed_m_count += processing_stats[2]
     # -----------------------------
     # Time to filter based on UMIs
     # (and output)
@@ -180,6 +183,7 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
                 
                 if len(ambig_partners) > 1:
                     for g_alt in ambig_partners:
+                        ambig_umi_counts[g_alt] += 1
                         ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
                         target_genes.add(g_alt)
             else:

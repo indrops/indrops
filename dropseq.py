@@ -2,6 +2,7 @@ import os, subprocess
 import itertools
 import operator
 from collections import defaultdict
+import cPickle as pickle
 
 from itertools import product, combinations
 from future.builtins import dict #So dict.keys/values/items are memory efficient
@@ -180,7 +181,7 @@ def run(paths, keep_barcodes=[]):
             i += 1
             if i%1000000 == 0:
                 sec_per_mil = (time.time()-start_time)/(float(i)/10**6)
-                print('%d reads parsed, kept %d reads, %.02f' % (i, kept_reads, sec_per_mil))
+                print('%d reads parsed, kept %d reads, %.02f seconds per M reads.' % (i, kept_reads, sec_per_mil))
 
             if keep:
                 bc, umi = result
@@ -191,10 +192,11 @@ def run(paths, keep_barcodes=[]):
                 filter_fail_counter[result]
 
     #Do something with results
+    with open(paths['barcode_read_counts'], 'w') as f:
+        pickle.dump(dict(barcode_read_counter), f)
 
 
-
-def run_multiprocess(paths):
+def run_multithreaded(paths):
     import multiprocessing, multiprocessing.queues
     from multiprocessing import Process, current_process
     import string
@@ -367,25 +369,34 @@ def run_multiprocess(paths):
 
 
 if __name__=="__main__":
-    base_dir = ''
-    barcode_dir = ''
-    paths = {
-        'r1_input': os.path.join(base_dir, 'test.R1.fastq.aa.gz'),
-        'r2_input': os.path.join(base_dir, 'test.R2.fastq.aa.gz'),
-        'input_filetype': 'gz',
-        'filtered_fastq': os.path.join(base_dir, 'test.filtered.fastq'),
-        'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
-        'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-    }
+    import sys
 
-    # paths = {
-    #     'r1_input': os.path.join(base_dir, 'test.R1.fastq'),
-    #     'r2_input': os.path.join(base_dir, 'test.R2.fastq'),
-    #     'input_filetype': 'fastq',
-    #     'filtered_fastq': os.path.join(base_dir, 'test.filtered.fastq'),
-    #     'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
-    #     'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-    # }
+    if len(sys.argv)==1 or sys.argv[1] == 'local':
+
+        base_dir = '/Users/averes/Projects/Melton/temp_dropseq/'
+        barcode_dir = '/Users/averes/Projects/Melton/temp_dropseq/'
+        paths = {
+            'r1_input': os.path.join(base_dir, 'test.R1.fastq.aa.gz'),
+            'r2_input': os.path.join(base_dir, 'test.R2.fastq.aa.gz'),
+            'input_filetype': 'gz',
+            'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'),
+            'filtered_fastq': os.path.join(base_dir, 'test.filtered.fastq'),
+            'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
+            'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
+        }
+
+    elif sys.argv[1] == 's6d13':
+        base_dir = '/n/regal/melton_lab/adrianveres/datasets/S6D13_cells/data/'
+        barcode_dir = '/n/beta_cell/Users/adrianveres/dropseq_data/'
+        paths = {
+            'r1_input': os.path.join(base_dir, 'S6D13-100_S0.R1.fastq.gz'),
+            'r2_input': os.path.join(base_dir, 'S6D13-100_S0.R2.fastq.gz'),
+            'input_filetype': 'gz',
+            'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'),
+            'filtered_fastq': os.path.join(base_dir, 'S6D13-100.filtered.fastq'),
+            'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
+            'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
+        }
 
     # paths = {
     #     'r1_input': os.path.join(base_dir, 'S6D13-100.R1.fastq.aa.gz'),
