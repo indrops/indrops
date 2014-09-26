@@ -11,6 +11,7 @@ def run(args):
     distance_from_tx_end = args.d
     counts_output_handle = args.counts
     split_ambiguities = args.split_ambi
+    using_mixed_ref = args.mixed_ref
     print_err('Going for it with %d' % distance_from_tx_end)
     #Assume that references are name 'transcript_name|gene_name'
     tx_to_gid = lambda tx: tx.split('|')[1] 
@@ -50,13 +51,29 @@ def run(args):
 
         #Choose 1 alignment per gene to output.
         chosen_alignments = {}
-        if 0 < len(genes) <= multiple_alignment_threshold:
+        if using_mixed_ref:
+            refs = set(g.split(':')[1] for g in genes)
+            keep_read = (len(refs) == 1) and (0 < len(genes) <= multiple_alignment_threshold)
+        else:
+            keep_read = 0 < len(genes) <= multiple_alignment_threshold
+
+        if keep_read:
             for gene in genes:
                 gene_alignments = [a for a in alignments if tx_to_gid(sam_input.getrname(a.tid)) == gene]
                 chosen_alignment = sorted(gene_alignments, key=lambda a: ref_lengths[a.tid], reverse=True)[0]
                 chosen_alignments[gene] = chosen_alignment
+            
+            if using_mixed_ref and 'hg19' in refs:
+                print_err(' %s' % str(genes))
+                print_err('  %s %d %d %s' % (gene, chosen_alignment.mapq, chosen_alignment.qlen, str(chosen_alignment.cigar)))
+
         else:
             failed_m_threshold = True
+            # if len(refs) == 2:
+            #     print_err(' Throwing out read, number of aligns: %d' % len(genes))
+            #     for g,a in chosen_alignments.items():
+            #         print_err('  %s, mapping quality: %d' % (g, a.mapq))
+            #         print_err('  CIGAR string: %s' % str(a.cigar))
 
         read_filter_status = (unique, rescued_non_unique, failed_m_threshold)
         return chosen_alignments, read_filter_status
@@ -262,6 +279,7 @@ if __name__=="__main__":
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
     parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
+    parser.add_argument('--mixed_ref', help="Reference is mixed, with records name 'gene:ref', should only keep reads that align to one ref.", action='store_true', default=False)
     parser.add_argument('--counts', type=argparse.FileType('w'))
     args = parser.parse_args()
     run(args)

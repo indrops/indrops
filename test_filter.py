@@ -19,12 +19,25 @@ mixed = '/Users/averes/Projects/Melton/hg19_mm10/mm10_hg19_mixed'
 
 
 # RUN FOR TEST FILES
-# input_filename = '/Users/averes/Projects/Melton/temp_dropseq/killme.fq'
-input_filename = '/Users/averes/Projects/Melton/Dropseq/av1.fastq'
+input_filename = '/Users/averes/Projects/Melton/temp_dropseq/killme.fq'
+counts_filename = '/Users/averes/Projects/Melton/temp_dropseq/killme.mixed.counts'
+
+# input_filename = '/Users/averes/Projects/Melton/temp_dropseq/head_to_head/reads_100_157.fq'
+# counts_filename = '/Users/averes/Projects/Melton/temp_dropseq/head_to_head/reads_100_157.fq'
+
+
+# input_filename = '/Users/averes/Projects/Melton/temp_dropseq/av1.fastq'
 # p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -a --best --strata --sam --norc' % (mixed, input_filename), stdout=subprocess.PIPE, shell=True)
-p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -a --best --strata --sam --norc -n 2 --seedlen 15 --chunkmbs 300' % (mixed, input_filename), stdout=subprocess.PIPE, shell=True)
+# p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -a --best --strata --sam --norc -n 2 --seedlen 15 --chunkmbs 300' % (mixed, input_filename), stdout=subprocess.PIPE, shell=True)
 # p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -k 200 --sam' % (ref, input_filename), stdout=subprocess.PIPE, shell=True)
-p2 = subprocess.Popen('/Users/averes/miniconda3/envs/py27/bin/python filter_alignments.py -m 1 --counts killme3.counts.txt --split_ambi > killme.bam',  stdin=p1.stdout, shell=True)
+# p2 = subprocess.Popen('/Users/averes/miniconda3/envs/py27/bin/python filter_alignments.py -m 1 --counts %s > /dev/null' % (counts_filename),  stdin=p1.stdout, shell=True)
+
+# MIXED REF run
+p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -a --best --strata --sam --norc -n 2 --seedlen 15 --chunkmbs 300' % (mixed, input_filename), stdout=subprocess.PIPE, shell=True)
+p2 = subprocess.Popen('/Users/averes/miniconda3/envs/py27/bin/python filter_alignments.py -m 1 --counts %s --split_ambi --mixed_ref > /dev/null' % (counts_filename),  stdin=p1.stdout, shell=True)
+
+
+
 p1.stdout.close()
 p2.wait()
 

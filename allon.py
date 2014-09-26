@@ -1,15 +1,12 @@
 import csv
-f = file('killme3.counts.txt', 'r')
+f = file('/Users/averes/Projects/Melton/temp_dropseq/killme.mixed.counts', 'r')
 h = next(f).rstrip().split('\t')
 h
 from collections import defaultdict
 cc = defaultdict(float)
 for line in f:
     d = line.rstrip().split('\t')
-    if 'mm10' in d[0]:
-        ref = 'mm10'
-    elif 'hg19' in d[0]:
-        ref = 'hg19'
+    ref = d[0].split(':')[1]
     cc[ref] += float(d[1])
 
 print(cc)
