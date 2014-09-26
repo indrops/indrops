@@ -6,9 +6,12 @@ from itertools import combinations
 
 print_err = lambda x: sys.stderr.write(str(x)+'\n')
 
-def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle):
+def run(args):
+    multiple_alignment_threshold = args.m
+    distance_from_tx_end = args.d
+    counts_output_handle = args.counts
+    split_ambiguities = args.split_ambi
     print_err('Going for it with %d' % distance_from_tx_end)
-
     #Assume that references are name 'transcript_name|gene_name'
     tx_to_gid = lambda tx: tx.split('|')[1] 
 
@@ -47,13 +50,14 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
         #Choose 1 alignment per gene to output.
         chosen_alignments = {}
-        if 0 < len(genes) <= multiple_alignment_threshold:
             for gene in genes:
                 gene_alignments = [a for a in alignments if tx_to_gid(sam_input.getrname(a.tid)) == gene]
                 chosen_alignment = sorted(gene_alignments, key=lambda a: ref_lengths[a.tid], reverse=True)[0]
                 chosen_alignments[gene] = chosen_alignment
+        if 0 < len(genes) <= multiple_alignment_threshold:
         else:
             failed_m_threshold = True
+            
 
         read_filter_status = (unique, rescued_non_unique, failed_m_threshold)
         return chosen_alignments, read_filter_status
@@ -87,7 +91,11 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
                 chosen_alignments, processing_stats = process_read_alignments(read_alignments)
                 if chosen_alignments:
-                    umi = current_read.split(':')[4]
+                    split_name = current_read.split(':')
+                    if len(split_name) == 2:
+                        umi = split_name[1] #Adrian format
+                    else:
+                        umi = split_name[4] #Allon format
                     seq = read_alignments[0].seq
                     reads_by_umi[umi][seq] = chosen_alignments
 
@@ -106,9 +114,13 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
         #We might have left-over alignments when we are done 
         chosen_alignments, processing_stats = process_read_alignments(read_alignments)
         if chosen_alignments:
-                    umi = current_read.split(':')[4]
-                    seq = read_alignments[0].seq
-                    reads_by_umi[umi][seq] = chosen_alignments
+            split_name = current_read.split(':')
+            if len(split_name) == 2:
+                umi = split_name[1] #Adrian format
+            else:
+                umi = split_name[4] #Allon format
+            seq = read_alignments[0].seq
+            reads_by_umi[umi][seq] = chosen_alignments
 
         uniq_count += processing_stats[0]
         non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
@@ -119,8 +131,8 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
     # (and output)
     # --------------------------
     
-    umi_counts = defaultdict(int)
-    ambig_umi_counts = defaultdict(int)
+    umi_counts = defaultdict(float)
+    ambig_umi_counts = defaultdict(float)
     ambig_gene_partners = defaultdict(set)
     ambig_clique_count = defaultdict(list)
     for umi, umi_reads in reads_by_umi.items():
@@ -151,7 +163,9 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
                 gene_read_mapping[(g, r)] = float(g in umi_reads[r])/(len(umi_reads[r])**2)
                 # gene_read_mapping[(g, r)] = float(g in umi_reads[r])
 
-        target_genes = set()
+        target_genes = dict()
+        #Keys are genes, values are the number of ambiguous partner of each gene
+
         while len(r0) > 0:
             #For each gene in g0, compute how many reads point ot it
             gene_contrib = dict((gi, sum(gene_read_mapping[(gi, r)] for r in r0)) for gi in g0)
@@ -164,7 +178,8 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
             #Pick a gene. Which doesn't matter until the last step
             g = max_contrib_genes[0]
-            target_genes.add(g)
+            # target_genes.add(g)
+            
             for r in copy(r0): #Take a copy of r0 doesn't change as we iterate through it
                 if gene_read_mapping[(g, r)]: #Remove any reads from r0 that contributed to the picked gene.
                     r0.remove(r)
@@ -183,10 +198,10 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
                 
                 if len(ambig_partners) > 1:
                     for g_alt in ambig_partners:
-                        ambig_umi_counts[g_alt] += 1
                         ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
-                        target_genes.add(g_alt)
+                        target_genes[g_alt] = float(len(ambig_partners))    
             else:
+                target_genes[g] = 1.
                 ambig_clique_count[1].append(umi)
 
             #Remove g here, so that g is part of the updated gene_contrib, when necessary
@@ -204,9 +219,13 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
 
         #For each target gene, output the best alignment
         #and record umi count
-        for gene in target_genes:
+        for gene, ambigs in target_genes.items():
             sam_output.write(best_alignment_for_gene[gene])
-            umi_counts[gene] += 1
+
+            split_between = ambigs if split_ambiguities else 1.
+            umi_counts[gene] += 1./split_between
+            ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
+
 
     #Output the counts per gene
     all_genes = set()
@@ -217,7 +236,7 @@ def run(multiple_alignment_threshold, distance_from_tx_end, counts_output_handle
     counts_output_handle.write('%s\n' % '\t'.join(['Gene Symbol', 'Counts', 'Ambig counts', 'Ambig partners']))
     for gene in sorted(all_genes):
         if ambig_gene_partners[gene]:
-            ambig_partners = frozenset.intersection(*ambig_gene_partners[gene])-frozenset((gene,))
+            ambig_partners = frozenset.union(*ambig_gene_partners[gene])-frozenset((gene,))
         else:
             ambig_partners = []
         data_row = [gene, str(umi_counts[gene]), str(ambig_umi_counts[gene]), ' '.join(ambig_partners)]
@@ -243,6 +262,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
+    parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
     parser.add_argument('--counts', type=argparse.FileType('w'))
     args = parser.parse_args()
-    run(args.m, args.d, args.counts)
+    run(args)

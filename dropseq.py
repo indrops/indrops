@@ -5,6 +5,7 @@ from collections import defaultdict
 import cPickle as pickle
 
 import numpy as np
+import re
 
 from itertools import product, combinations
 # from future.builtins import dict #So dict.keys/values/items are memory efficient
@@ -237,6 +238,8 @@ def good_barcode_list(paths, threshold=15000):
         if count >= threshold:
             good_barcodes.append(bc)
 
+    print(len(good_barcodes))
+    asss
     barcode_names = {}
     for i, bc in enumerate(sorted(good_barcodes, key=lambda b: barcode_read_counter[bc], reverse=True)):
         barcode_names[bc] = 'bc%d' % (i+1)
@@ -274,6 +277,33 @@ def split_reads_by_barcode(paths):
             for chunk in chunks:
                 out.write(chunk)
 
+def prepare_transcriptome_index():
+    in_genes = '/Users/averes/Projects/Melton/temp_dropseq/genes.gtf'
+    out_genes = '/Users/averes/Projects/Melton/temp_dropseq/genes.annotated.gtf'
+    with open(in_genes, 'r') as in_f, open(out_genes, 'w') as out_f:
+        for line in in_f:
+            chr_name = line.rstrip().split('\t')[0]
+            if '_hap' in chr_name or 'Un_gl' in chr_name or '_' in chr_name:
+                continue
+            gene_name = re.search(r'gene_id \"(.*?)\";', line).group(1)
+            out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
+            out_f.write(out_line)
+    
+def align_barcode_reads():
+    ref = '/Users/averes/Projects/Melton/mm10_transcriptome_reindex/mm10_refseq_annotated_rsem'
+
+
+# with open('/Users/averes/Projects/Melton/temp_seq_data/good_barcodes.txt') as f:
+#     for i,line in enumerate(f):
+#         print('Running %d' % i)
+#         bc = line.rstrip()    
+#         input_filename = '/Users/averes/Projects/Melton/temp_seq_data/by_barcode_unique/%s.fastq' % bc
+#         output_filename = '/Users/averes/Projects/Melton/temp_seq_data/by_barcode_counts/%s.txt' % bc
+
+#         p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -k 200 --sam' % (ref, input_filename), stdout=subprocess.PIPE, shell=True)
+#         p2 = subprocess.Popen('/Users/averes/miniconda3/envs/py27/bin/python alignments_to_counts.py --gtf genes.gtf --out %s' % output_filename,  stdin=p1.stdout, shell=True)
+#         p1.stdout.close()
+#         p2.wait()
 
 if __name__=="__main__":
     import sys
@@ -318,7 +348,9 @@ if __name__=="__main__":
     #     'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
     # }
 
+    # prepare_transcriptome_index()
+
     # run(paths)
     # run_multiprocess(paths)
-    # good_barcode_list(paths, 15000)
+    good_barcode_list(paths, 15000)
     # split_reads_by_barcode(paths)
