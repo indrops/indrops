@@ -50,14 +50,13 @@ def run(args):
 
         #Choose 1 alignment per gene to output.
         chosen_alignments = {}
+        if 0 < len(genes) <= multiple_alignment_threshold:
             for gene in genes:
                 gene_alignments = [a for a in alignments if tx_to_gid(sam_input.getrname(a.tid)) == gene]
                 chosen_alignment = sorted(gene_alignments, key=lambda a: ref_lengths[a.tid], reverse=True)[0]
                 chosen_alignments[gene] = chosen_alignment
-        if 0 < len(genes) <= multiple_alignment_threshold:
         else:
             failed_m_threshold = True
-            
 
         read_filter_status = (unique, rescued_non_unique, failed_m_threshold)
         return chosen_alignments, read_filter_status
