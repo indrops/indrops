@@ -63,9 +63,9 @@ def run(args):
                 chosen_alignment = sorted(gene_alignments, key=lambda a: ref_lengths[a.tid], reverse=True)[0]
                 chosen_alignments[gene] = chosen_alignment
             
-            if using_mixed_ref and 'hg19' in refs:
-                print_err(' %s' % str(genes))
-                print_err('  %s %d %d %s' % (gene, chosen_alignment.mapq, chosen_alignment.qlen, str(chosen_alignment.cigar)))
+            # if using_mixed_ref and 'hg19' in refs:
+            #     print_err(' %s' % str(genes))
+            #     print_err('  %s %d %d %s' % (gene, chosen_alignment.mapq, chosen_alignment.qlen, str(chosen_alignment.cigar)))
 
         else:
             failed_m_threshold = True
@@ -211,11 +211,12 @@ def run(args):
                 ambig_partners = filter(lambda g: gene_contrib[g]==0, max_contrib_genes)
 
                 ambig_clique_count[len(ambig_partners)].append(umi)
-                
-                if len(ambig_partners) > 1:
-                    for g_alt in ambig_partners:
-                        ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
-                        target_genes[g_alt] = float(len(ambig_partners))    
+        
+                #Ambig partners will often be a 1-element set. That's ok.
+                #Then it will be equivalent to "target_genes[g] = 1."    
+                for g_alt in ambig_partners:
+                    ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
+                    target_genes[g_alt] = float(len(ambig_partners))    
             else:
                 target_genes[g] = 1.
                 ambig_clique_count[1].append(umi)
