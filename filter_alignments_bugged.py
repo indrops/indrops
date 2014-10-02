@@ -215,9 +215,11 @@ def run(args):
                 #Ambig partners will often be a 1-element set. That's ok.
                 #Then it will be equivalent to "target_genes[g] = 1."
                 print_err(len(ambig_partners))
-                for g_alt in ambig_partners:
-                    ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
-                    target_genes[g_alt] = float(len(ambig_partners))    
+                if len(ambig_partners) > 1:
+                    print_err('outputing')
+                    for g_alt in ambig_partners:
+                        ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
+                        target_genes[g_alt] = float(len(ambig_partners))    
             else:
                 target_genes[g] = 1.
                 ambig_clique_count[1].append(umi)

@@ -7,6 +7,7 @@ cc = defaultdict(float)
 for line in f:
     d = line.rstrip().split('\t')
     ref = d[0].split(':')[1]
+    print(float(d[1]))
     cc[ref] += float(d[1])
 
 print(cc)
