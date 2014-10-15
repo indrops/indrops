@@ -11,7 +11,7 @@ def run(args):
     distance_from_tx_end = args.d
     counts_output_handle = args.counts
     split_ambiguities = args.split_ambi
-    split_count_threshold = args.u
+    ambig_count_threshold = args.u
     using_mixed_ref = args.mixed_ref
     print_err('Going for it with %d' % distance_from_tx_end)
     #Assume that references are name 'transcript_name|gene_name'
@@ -215,10 +215,11 @@ def run(args):
         
                 #Ambig partners will often be a 1-element set. That's ok.
                 #Then it will be equivalent to "target_genes[g] = 1."
-                print_err(len(ambig_partners))
-                for g_alt in ambig_partners:
-                    ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
-                    target_genes[g_alt] = float(len(ambig_partners))    
+                if len(ambig_partners) <= ambig_count_threshold:
+
+                    for g_alt in ambig_partners:
+                        ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
+                        target_genes[g_alt] = float(len(ambig_partners))    
             else:
                 target_genes[g] = 1.
                 ambig_clique_count[1].append(umi)
@@ -240,11 +241,10 @@ def run(args):
         #and record umi count
         for gene, ambigs in target_genes.items():
             sam_output.write(best_alignment_for_gene[gene])
-
-            if ambigs <= split_count_threshold:
-                split_between = ambigs if split_ambiguities else 1.
-                umi_counts[gene] += 1./split_between
-                ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
+            
+            split_between = ambigs if split_ambiguities else 1.
+            umi_counts[gene] += 1./split_between
+            ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
 
 
     #Output the counts per gene
