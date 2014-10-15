@@ -11,6 +11,7 @@ def run(args):
     distance_from_tx_end = args.d
     counts_output_handle = args.counts
     split_ambiguities = args.split_ambi
+    split_count_threshold = args.u
     using_mixed_ref = args.mixed_ref
     print_err('Going for it with %d' % distance_from_tx_end)
     #Assume that references are name 'transcript_name|gene_name'
@@ -240,9 +241,10 @@ def run(args):
         for gene, ambigs in target_genes.items():
             sam_output.write(best_alignment_for_gene[gene])
 
-            split_between = ambigs if split_ambiguities else 1.
-            umi_counts[gene] += 1./split_between
-            ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
+            if ambigs <= split_count_threshold:
+                split_between = ambigs if split_ambiguities else 1.
+                umi_counts[gene] += 1./split_between
+                ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
 
 
     #Output the counts per gene
@@ -279,6 +281,7 @@ if __name__=="__main__":
     import sys, argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
+    parser.add_argument('-u', help='Ignore counts from UMI that should be split among more than U genes.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
     parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
     parser.add_argument('--mixed_ref', help="Reference is mixed, with records name 'gene:ref', should only keep reads that align to one ref.", action='store_true', default=False)
