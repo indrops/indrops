@@ -42,7 +42,7 @@ if __name__=="__main__":
         }
 
         trim_cmd = "java -jar %(trimmomatic)s SE -threads 1 -phred33  %(fastq_file)s  %(trimmed_fastq_file)s LEADING:28 SLIDINGWINDOW:4:20 MINLEN:16" % cmd_params
-        count_cmd = "%(bowtie)s %(index)s %(fastq_file)s --un %(unal_file)s -p 1 -m 20 -a --best --strata --sam --norc -n 2 --seedlen 15 --chunkmbs 300 | %(python)s %(filter)s -d 400 -m 4 --split_ambi --counts %(counts_file)s > %(bam_file)s" % cmd_params
+        count_cmd = "%(bowtie)s %(index)s %(fastq_file)s --un %(unal_file)s -p 1 -m 20 -a --best --strata --sam --norc -n 2 --seedlen 15 --chunkmbs 300 | %(python)s %(filter)s -d 400 -m 10 -u 2 --counts %(counts_file)s > %(bam_file)s" % cmd_params
         if os.path.isfile(cmd_params['fastq_file']):
             subprocess.call(trim_cmd, shell=True)
             subprocess.call(count_cmd, shell=True)

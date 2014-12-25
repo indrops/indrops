@@ -8,7 +8,6 @@ import numpy as np
 import re
 
 from itertools import product, combinations
-# from future.builtins import dict #So dict.keys/values/items are memory efficient
 import time
 
 def string_hamming_distance(str1, str2):
@@ -175,7 +174,13 @@ def from_fastq(handle):
         yield name, seq, qual
 
 
-def run(paths, keep_barcodes=[]):
+def filter_and_count_reads(paths):
+    """
+    Input the two raw FastQ files
+    Output: 
+        - A single fastQ file that uses the read name to store the barcoding information
+        - A pickle of number of reads originating from each barcode 
+    """
     #Prepare data collection
     barcode_read_counter = defaultdict(int)
     filter_fail_counter = defaultdict(int)
@@ -210,6 +215,10 @@ def run(paths, keep_barcodes=[]):
         pickle.dump(dict(barcode_read_counter), f)
 
 def barcode_histogram(paths):
+    """
+    Takes the read-count-by-barcode pickle and outputs a histogram used 
+    to determine a treshold on the minimal number of reads coming from good barcodes
+    """
     with open(paths['barcode_read_counts'], 'r') as f:
         barcode_read_counter = pickle.load(f)
 
@@ -227,9 +236,13 @@ def barcode_histogram(paths):
     ax.set_xscale('log')
     ax.set_xlabel('Reads per barcode')
     ax.set_ylabel('#reads coming from bin')
-    plt.savefig('reads_by_barcode_bin.png')
+    plt.savefig(paths['barcode_histogram'])
 
 def good_barcode_list(paths, threshold=15000):
+    """
+    Takes the read-count-by-barcode pickle and a minimal threshold value, 
+    Outputs a list of barcodes to the retained and assigns a 'bcN' name to each barcode
+    """
     with open(paths['barcode_read_counts'], 'r') as f:
         barcode_read_counter = pickle.load(f)
 
@@ -239,7 +252,6 @@ def good_barcode_list(paths, threshold=15000):
             good_barcodes.append(bc)
 
     print(len(good_barcodes))
-    asss
     barcode_names = {}
     for i, bc in enumerate(sorted(good_barcodes, key=lambda b: barcode_read_counter[bc], reverse=True)):
         barcode_names[bc] = 'bc%d' % (i+1)
@@ -248,6 +260,10 @@ def good_barcode_list(paths, threshold=15000):
         pickle.dump(barcode_names, f)
 
 def split_reads_by_barcode(paths):
+    """
+    Starts with the list of good barcodes and the filtered FastQ
+    Splits the filtered FastQ into one FastQ file per read. 
+    """
     with open(paths['good_barcodes_with_names'], 'r') as f:
         barcode_names = pickle.load(f)
 
@@ -262,7 +278,7 @@ def split_reads_by_barcode(paths):
             if bc in barcode_names:
                 j += 1
                 bc_name = barcode_names[bc]
-                filename = os.path.join(paths['barcode_dir'], '%s.fastq' % bc_name)
+                filename = os.path.join(paths['split_barcodes_dir'], '%s.fastq' % bc_name)
                 pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
                 if j % 1000000 == 0:
                     for fn, chunks in pre_write.items():
@@ -288,69 +304,30 @@ def prepare_transcriptome_index():
             gene_name = re.search(r'gene_id \"(.*?)\";', line).group(1)
             out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
             out_f.write(out_line)
-    
-def align_barcode_reads():
-    ref = '/Users/averes/Projects/Melton/mm10_transcriptome_reindex/mm10_refseq_annotated_rsem'
-
-
-# with open('/Users/averes/Projects/Melton/temp_seq_data/good_barcodes.txt') as f:
-#     for i,line in enumerate(f):
-#         print('Running %d' % i)
-#         bc = line.rstrip()    
-#         input_filename = '/Users/averes/Projects/Melton/temp_seq_data/by_barcode_unique/%s.fastq' % bc
-#         output_filename = '/Users/averes/Projects/Melton/temp_seq_data/by_barcode_counts/%s.txt' % bc
-
-#         p1 = subprocess.Popen('/usr/local/bin/bowtie %s %s -m 200 -k 200 --sam' % (ref, input_filename), stdout=subprocess.PIPE, shell=True)
-#         p2 = subprocess.Popen('/Users/averes/miniconda3/envs/py27/bin/python alignments_to_counts.py --gtf genes.gtf --out %s' % output_filename,  stdin=p1.stdout, shell=True)
-#         p1.stdout.close()
-#         p2.wait()
 
 if __name__=="__main__":
-    import sys
+    
+    #Change to relevant directory
+    base_dir = '/n/regal/melton_lab/adrianveres/datasets/S6D13_cells/data/'
 
-    if len(sys.argv)==1 or sys.argv[1] == 'local':
+    #Where you have the two barcode lists
+    barcode_dir = '/n/beta_cell/Users/adrianveres/dropseq_data/' 
+    
+    paths = {
+        'r1_input': os.path.join(base_dir, 'S6D13-100_S0.R1.fastq.gz'),
+        'r2_input': os.path.join(base_dir, 'S6D13-100_S0.R2.fastq.gz'),
+        'input_filetype': 'gz', #Either 'gz' (so the script deals with compression) or 'fq'/'fastq' so it doesn't
+        'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'), #Temp file
+        'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'), #Temp file
+        'filtered_fastq': os.path.join(base_dir, 'S6D13-100.filtered.fastq'), #Fastq file after removal of bad reads, but before split
+        'barcode_histogram': os.path.join(base_dir, 'reads_from_barcodes.png')
+        'split_barcodes_dir': os.path.join(base_dir, 'barcodes'), #Directory where individual barcode fastqs will be placed
+        'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
+        'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
+    
 
-        base_dir = '/Users/averes/Projects/Melton/temp_dropseq/'
-        barcode_dir = '/Users/averes/Projects/Melton/temp_dropseq/'
-        paths = {
-            'r1_input': os.path.join(base_dir, 'test.R1.fastq.aa.gz'),
-            'r2_input': os.path.join(base_dir, 'test.R2.fastq.aa.gz'),
-            'input_filetype': 'gz',
-            'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'),
-            'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'),
-            'filtered_fastq': os.path.join(base_dir, 'test.filtered.fastq'),
-            'barcode_dir': os.path.join(base_dir, 'barcodes'),
-            'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
-            'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-        }
-
-    elif sys.argv[1] == 's6d13':
-        base_dir = '/n/regal/melton_lab/adrianveres/datasets/S6D13_cells/data/'
-        barcode_dir = '/n/beta_cell/Users/adrianveres/dropseq_data/'
-        paths = {
-            'r1_input': os.path.join(base_dir, 'S6D13-100_S0.R1.fastq.gz'),
-            'r2_input': os.path.join(base_dir, 'S6D13-100_S0.R2.fastq.gz'),
-            'input_filetype': 'gz',
-            'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'),
-            'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'),
-            'filtered_fastq': os.path.join(base_dir, 'S6D13-100.filtered.fastq'),
-            'barcode_dir': os.path.join(base_dir, 'barcodes'),
-            'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
-            'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-        }
-
-    # paths = {
-    #     'r1_input': os.path.join(base_dir, 'S6D13-100.R1.fastq.aa.gz'),
-    #     'r2_input': os.path.join(base_dir, 'S6D13-100.R2.fastq.aa.gz'),
-    #     'input_filetype': 'gz',
-    #     'filtered_fastq': os.path.join(base_dir, 'test.filtered.fastq'),
-    #     'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
-    #     'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-    # }
-
-    # prepare_transcriptome_index()
-
-    # run(paths)
-    # run_multiprocess(paths)
+    #See the functiond description for these steps (I suggest running them one at a time)
+    filter_and_count_reads(paths)
+    barcode_histogram(paths) #Inspect this histogram to set the threshold below
     good_barcode_list(paths, 15000)
-    # split_reads_by_barcode(paths)
+    split_reads_by_barcode(paths)
