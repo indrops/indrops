@@ -334,7 +334,7 @@ if __name__=="__main__":
         elif sys.argv[1] == 'histo':
             barcode_histogram(paths) #Inspect this histogram to set the threshold below
         elif sys.argv[1] == 'choose_barcodes':
-            choose_good_barcodes(paths, int(sys.argv[2]))
+            choose_good_barcodes(paths, threshold=int(sys.argv[2]))
         elif sys.argv[1] == 'split':
             split_reads_by_barcode(paths)
 
