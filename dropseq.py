@@ -238,7 +238,7 @@ def barcode_histogram(paths):
     ax.set_ylabel('#reads coming from bin')
     plt.savefig(paths['barcode_histogram'])
 
-def good_barcode_list(paths, threshold=15000):
+def choose_good_barcodes(paths, threshold=15000):
     """
     Takes the read-count-by-barcode pickle and a minimal threshold value, 
     Outputs a list of barcodes to the retained and assigns a 'bcN' name to each barcode
@@ -327,7 +327,14 @@ if __name__=="__main__":
     
 
     #See the functiond description for these steps (I suggest running them one at a time)
-    filter_and_count_reads(paths)
-    barcode_histogram(paths) #Inspect this histogram to set the threshold below
-    good_barcode_list(paths, 15000)
-    split_reads_by_barcode(paths)
+    import sys
+    if len(sys.argv)>1:
+        if sys.argv[1] == 'filter':
+            filter_and_count_reads(paths)
+        elif sys.argv[1] == 'histo':
+            barcode_histogram(paths) #Inspect this histogram to set the threshold below
+        elif sys.argv[1] == 'choose_barcodes':
+            choose_good_barcodes(paths, int(sys.argv[2]))
+        elif sys.argv[1] == 'split':
+            split_reads_by_barcode(paths)
+
