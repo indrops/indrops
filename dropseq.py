@@ -325,11 +325,11 @@ if __name__=="__main__":
         'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'), #Temp file
         'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'), #Temp file
         'filtered_fastq': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.filtered.fastq'), #Fastq file after removal of bad reads, but before split
-        'barcode_histogram': os.path.join(base_dir, 'reads_from_barcodes.png')
+        'barcode_histogram': os.path.join(base_dir, 'reads_from_barcodes.png'),
         'split_barcodes_dir': os.path.join(base_dir, 'barcodes'), #Directory where individual barcode fastqs will be placed
         'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
         'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-    
+    }
 
     #See the functiond description for these steps (I suggest running them one at a time)
     import sys
