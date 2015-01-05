@@ -2,7 +2,12 @@ import os, subprocess
 import itertools
 import operator
 from collections import defaultdict
-import cPickle as pickle
+
+# is this python 2 or 3?
+try:
+   import cPickle as pickle
+except:
+   import pickle
 
 import numpy as np
 import re
@@ -308,18 +313,18 @@ def prepare_transcriptome_index():
 if __name__=="__main__":
     
     #Change to relevant directory
-    base_dir = '/n/regal/melton_lab/adrianveres/datasets/S6D13_cells/data/'
+    base_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/'
 
     #Where you have the two barcode lists
-    barcode_dir = '/n/beta_cell/Users/adrianveres/dropseq_data/' 
+    barcode_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/barcode_lists/' 
     
     paths = {
-        'r1_input': os.path.join(base_dir, 'S6D13-100_S0.R1.fastq.gz'),
-        'r2_input': os.path.join(base_dir, 'S6D13-100_S0.R2.fastq.gz'),
+        'r1_input': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.R1.fastq.gz'),
+        'r2_input': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.R2.fastq.gz'),
         'input_filetype': 'gz', #Either 'gz' (so the script deals with compression) or 'fq'/'fastq' so it doesn't
         'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'), #Temp file
         'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'), #Temp file
-        'filtered_fastq': os.path.join(base_dir, 'S6D13-100.filtered.fastq'), #Fastq file after removal of bad reads, but before split
+        'filtered_fastq': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.filtered.fastq'), #Fastq file after removal of bad reads, but before split
         'barcode_histogram': os.path.join(base_dir, 'reads_from_barcodes.png')
         'split_barcodes_dir': os.path.join(base_dir, 'barcodes'), #Directory where individual barcode fastqs will be placed
         'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
