@@ -30,7 +30,7 @@ time.sleep(5)
 
 bsub2 = sh.bsub.bake(J=job % "histo", 
 	o=logs,
-	w="done(%s_%s_filter)" % (date, expt),
+	w="done(%s)" % (job % "filter"),
 	W="10:00", q="priority", R="select[mem>=16000] && rusage[mem=16000]", N=True)
 bsub2("python dropseq.py histo")
 
@@ -38,7 +38,7 @@ time.sleep(5)
 
 bsub3 = sh.bsub.bake(J=job % "choose_barcodes", 
 	o=logs,
-	w="done(%s_%s_histo)" % (date, expt),
+	w="done(%s)" % (job % "histo"),
 	W="10:00", q="priority", R="select[mem>=16000] && rusage[mem=16000]", N=True)
 bsub3("python dropseq.py choose_barcodes")
 
@@ -46,7 +46,7 @@ time.sleep(5)
 
 bsub4 = sh.bsub.bake(J=job % "split", 
 	o=logs,
-	w="done(%s_%s_choose_barcodes)" % (date, expt),
+	w="done(%s)" % (job % "choose_barcodes"),
 	W="10:00", q="priority", R="select[mem>=16000] && rusage[mem=16000]", N=True)
 bsub4("python dropseq.py split")
 

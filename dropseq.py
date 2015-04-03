@@ -235,13 +235,19 @@ def barcode_histogram(paths):
     y = np.array(count_freq.values())
     w = x*y
 
-    import matplotlib.pyplot as plt
+    import matplotlib
+    # if in orchestra use a different backend to prevent _tkinter error 
+    # when generating plot
+    if('IN_ORCHESTRA' in os.environ):
+        matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
     ax = plt.subplot(111)
     ax.hist(x, bins=np.logspace(0, 6, 50), weights=w)
     ax.set_xscale('log')
     ax.set_xlabel('Reads per barcode')
     ax.set_ylabel('#reads coming from bin')
     plt.savefig(paths['barcode_histogram'])
+    print "\nSuccessfully created histogram in %s." % paths['barcode_histogram']
 
 def choose_good_barcodes(paths, threshold=15000):
     """
@@ -256,7 +262,8 @@ def choose_good_barcodes(paths, threshold=15000):
         if count >= threshold:
             good_barcodes.append(bc)
 
-    print(len(good_barcodes))
+    print("\nFound %s barcodes passing filter." % len(good_barcodes))
+
     barcode_names = {}
     for i, bc in enumerate(sorted(good_barcodes, key=lambda b: barcode_read_counter[bc], reverse=True)):
         barcode_names[bc] = 'bc%d' % (i+1)
@@ -274,7 +281,9 @@ def split_reads_by_barcode(paths):
 
     i = 0
     j = 0
+    k = 0
     pre_write = defaultdict(list)
+    print "\nSuccessfully opened %s." % paths['good_barcodes_with_names']
 
     with open(paths['filtered_fastq'], 'r') as input_fastq:
         for name, seq, qual in from_fastq(input_fastq):
@@ -282,6 +291,7 @@ def split_reads_by_barcode(paths):
             bc, umi = name.split(':')
             if bc in barcode_names:
                 j += 1
+                k += 1
                 bc_name = barcode_names[bc]
                 filename = os.path.join(paths['split_barcodes_dir'], '%s.fastq' % bc_name)
                 pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
@@ -293,10 +303,14 @@ def split_reads_by_barcode(paths):
                     j = 0
                     pre_write = defaultdict(list)
 
+    print "\nSuccessfully read through %s." % paths['filtered_fastq']
+
     for fn, chunks in pre_write.items():
         with open(fn, 'a') as out:
             for chunk in chunks:
                 out.write(chunk)
+
+    print "\nSuccessfully split raw fastq into %s files." % k
 
 def prepare_transcriptome_index():
     in_genes = '/Users/averes/Projects/Melton/temp_dropseq/genes.gtf'
