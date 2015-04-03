@@ -313,18 +313,21 @@ def prepare_transcriptome_index():
 if __name__=="__main__":
     
     #Change to relevant directory
-    base_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/'
+    base_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/150402_b2'
+
+    #Experiment prefix
+    prefix = '2KCL_b2'
 
     #Where you have the two barcode lists
     barcode_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/barcode_lists/' 
     
     paths = {
-        'r1_input': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.R1.fastq.gz'),
-        'r2_input': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.R2.fastq.gz'),
-        'input_filetype': 'gz', #Either 'gz' (so the script deals with compression) or 'fq'/'fastq' so it doesn't
+        'r1_input': os.path.join(base_dir, 'FASTQ/raw_fastq/', prefix + '.R1.fastq'),
+        'r2_input': os.path.join(base_dir, 'FASTQ/raw_fastq/', prefix + '.R2.fastq'),
+        'input_filetype': 'fastq', #Either 'gz' (so the script deals with compression) or 'fq'/'fastq' so it doesn't
         'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'), #Temp file
         'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'), #Temp file
-        'filtered_fastq': os.path.join(base_dir, 'FASTQ', 'dropseq_0KCL.filtered.fastq'), #Fastq file after removal of bad reads, but before split
+        'filtered_fastq': os.path.join(base_dir, 'FASTQ', prefix + '.filtered.fastq'), #Fastq file after removal of bad reads, but before split
         'barcode_histogram': os.path.join(base_dir, 'reads_from_barcodes.png'),
         'split_barcodes_dir': os.path.join(base_dir, 'barcodes'), #Directory where individual barcode fastqs will be placed
         'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
