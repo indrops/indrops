@@ -2,17 +2,31 @@ import os, subprocess
 import itertools
 import operator
 from collections import defaultdict
-import cPickle as pickle
+import errno
+
+# cPickle is a faster version of pickle that isn't installed in python3
+# inserted try statement just in case
+try:
+   import cPickle as pickle
+except:
+   import pickle
 
 import numpy as np
 import re
 
+# product: product(A, B) returns the same as ((x,y) for x in A for y in B).
+# combination: Return r length subsequences of elements from the input iterable.
 from itertools import product, combinations
 import time
 
 def string_hamming_distance(str1, str2):
     """
     Fast hamming distance over 2 strings known to be of same length.
+    In information theory, the Hamming distance between two strings of equal 
+    length is the number of positions at which the corresponding symbols 
+    are different.
+
+    eg "karolin" and "kathrin" is 3.
     """
     return sum(itertools.imap(operator.ne, str1, str2))
 
@@ -22,10 +36,15 @@ def rev_comp(seq):
 
 def seq_neighborhood(seq, n_subs=1):
     """
-    Given a sequence, yield all sequences within n_subs substitutions of that sequence.
+    Given a sequence, yield all sequences within n_subs substitutions of 
+    that sequence by looping through each combination of base pairs within
+    each combination of positions.
     """
     for positions in combinations(range(len(seq)), n_subs):
+    # yields all unique combinations of indeces for n_subs mutations
         for subs in product(*("ATGCN",)*n_subs):
+        # yields all combinations of possible nucleotides for strings of length
+        # n_subs
             seq_copy = list(seq)
             for p, s in zip(positions, subs):
                 seq_copy[p] = s
@@ -33,26 +52,42 @@ def seq_neighborhood(seq, n_subs=1):
             
 def build_neighborhoods(barcode_file):
     """
-    Given a set of barcodes, produce sequences which can unambiguously be mapped to these barcodes,
-    within 2 substitutions. If a sequence maps to multiple barcodes, get rid of it.
-    However, if a sequences maps to a bc1 with 1change and another with 2changes, keep the 1change mapping.
+    Given a set of barcodes, produce sequences which can unambiguously be
+    mapped to these barcodes, within 2 substitutions. If a sequence maps to 
+    multiple barcodes, get rid of it. However, if a sequences maps to a bc1 with 
+    1change and another with 2changes, keep the 1change mapping.
     """
     
+    # contains all mutants that map uniquely to a barcode
     clean_mapping = dict()
+
+    # contain single or double mutants 
     mapping1 = defaultdict(set)
     mapping2 = defaultdict(set)
     
-    #Build the full neighborhood
+    #Build the full neighborhood and iterate through barcodes
     with open(barcode_file, 'rU') as f:
+        # iterate through each barcode (rstrip cleans string of whitespace)
         for line in f:
             barcode = rev_comp(line.rstrip())
+
+            # each barcode obviously maps to itself uniquely
             clean_mapping[barcode] = barcode
-            
+
+            # for each possible mutated form of a given barcode, either add
+            # the origin barcode into the set corresponding to that mutant or 
+            # create a new entry for a mutant not already in mapping1
+            # eg: barcodes CATG and CCTG would be in the set for mutant CTTG
+            # but only barcode CATG could generate mutant CANG
             for n in seq_neighborhood(barcode, 1):
                 mapping1[n].add(barcode)
+            
+            # same as above but with double mutants
             for n in seq_neighborhood(barcode, 2):
                 mapping2[n].add(barcode)   
-            
+    
+    # take all single-mutants and find those that could only have come from one
+    # specific barcode
     for k, v in mapping1.items():
         if k not in clean_mapping:
             if len(v) == 1:
@@ -89,6 +124,10 @@ def process_reads(name, read, polyT_len=7, hamming_threshold=3,
     poly_t = name[-polyT_len:]
     if string_hamming_distance(poly_t, 'T'*polyT_len) > 3:        
         return False, 'No_polyT'
+
+    # check for empty reads (due to adapter trimming)
+    if not read:
+        return False, 'empty_read'
     
     #Check for W1 adapter
     #Allow for up to hamming_threshold errors
@@ -114,6 +153,7 @@ def process_reads(name, read, polyT_len=7, hamming_threshold=3,
         # Check if BC1 and BC2 can be mapped to expected barcodes
         if bc1 in valid_bc1s:
             bc1 = valid_bc1s[bc1]
+            #WHY
         else:
             return False, 'BC1'
         if bc2 in valid_bc2s:
@@ -141,7 +181,7 @@ def weave_fastqs(r1_fastq, r2_fastq, filetype='gz'):
 
     while True:
         #Read 4 lines from each FastQ
-        next(r1_stream) #Read name
+        name = next(r1_stream) #Read name
         r1_seq = next(r1_stream).rstrip() #Read seq
         next(r1_stream) #+ line
         next(r1_stream) #Read qual
@@ -151,11 +191,15 @@ def weave_fastqs(r1_fastq, r2_fastq, filetype='gz'):
         next(r2_stream) #+ line
         r2_qual = next(r2_stream).rstrip() #Read qual
         
-        if not r1_seq or not r2_seq:
+        # changed to allow for empty reads (caused by adapter trimming)
+        if name:
+            yield r1_seq, r2_seq, r2_qual
+        else:
+        # if not r1_seq or not r2_seq:
             break
-        yield r1_seq, r2_seq, r2_qual
-    r1_stream.stdout.close()
-    r2_stream.stdout.close()
+
+    r1_stream.close()
+    r2_stream.close()
 
 def to_fastq_lines(bc, umi, seq, qual):
     """
@@ -196,7 +240,7 @@ def filter_and_count_reads(paths):
     with open(paths['filtered_fastq'], 'w') as output_fastq:
         for r1_seq, r2_seq, r2_qual in weave_fastqs(paths['r1_input'], paths['r2_input'], paths['input_filetype']):
             keep, result = process_reads(r1_seq, r2_seq, valid_bc1s=bc1s, valid_bc2s=bc2s)
-
+            # why not look at quality of r1_seq as well to toss out extra reads here?
             i += 1
             if i%1000000 == 0:
                 sec_per_mil = (time.time()-start_time)/(float(i)/10**6)
@@ -208,11 +252,16 @@ def filter_and_count_reads(paths):
                 barcode_read_counter[bc] += 1
                 output_fastq.write(to_fastq_lines(bc, umi, r2_seq, r2_qual))
             else:
-                filter_fail_counter[result]
+                filter_fail_counter[result] += 1
 
-    #Do something with results
+    #Save results
     with open(paths['barcode_read_counts'], 'w') as f:
         pickle.dump(dict(barcode_read_counter), f)
+
+    with open(paths['read_fail_counts'], 'w') as f:
+        pickle.dump(dict(filter_fail_counter), f)
+
+    print i, kept_reads
 
 def barcode_histogram(paths):
     """
@@ -230,7 +279,11 @@ def barcode_histogram(paths):
     y = np.array(count_freq.values())
     w = x*y
 
-    import matplotlib.pyplot as plt
+    # need to use Agg backend (which is noninteractive) on cluster
+    if('IN_ORCHESTRA' in os.environ):
+        matplotlib.use('Agg')
+        
+    from matplotlib import pyplot as plt
     ax = plt.subplot(111)
     ax.hist(x, bins=np.logspace(0, 6, 50), weights=w)
     ax.set_xscale('log')
@@ -305,26 +358,47 @@ def prepare_transcriptome_index():
             out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
             out_f.write(out_line)
 
+def check_dir(path):
+    """
+    Checks if directory already exists or not and creates it if it doesn't
+    """
+    try:
+        os.mkdir(path)
+    except OSError as exception:
+        if exception.errno != errno.EEXIST:
+            raise
+
 if __name__=="__main__":
     
     #Change to relevant directory
-    base_dir = '/n/regal/melton_lab/adrianveres/datasets/S6D13_cells/data/'
+    base_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/'
 
     #Where you have the two barcode lists
-    barcode_dir = '/n/beta_cell/Users/adrianveres/dropseq_data/' 
+    barcode_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/barcode_lists/'
+
+    # change to relevant experiment ID (no suffixes)
+    exp_id = 'dropseq_2KCL'
+
+    # generate directories for analysis outputs (unless it already exists)
+    check_dir(os.path.join(base_dir, "analyses"))
+    check_dir(os.path.join(base_dir, "analyses", exp_id))
+    check_dir(os.path.join(base_dir, "analyses", exp_id, 'stats'))
+    check_dir(os.path.join(base_dir, "analyses", exp_id, 'barcodes'))
+    check_dir(os.path.join(base_dir, "analyses", 'filtered_fastqs'))
     
     paths = {
-        'r1_input': os.path.join(base_dir, 'S6D13-100_S0.R1.fastq.gz'),
-        'r2_input': os.path.join(base_dir, 'S6D13-100_S0.R2.fastq.gz'),
+        'r1_input': os.path.join(base_dir, 'FASTQ', exp_id + '.R1.fastq.gz'),
+        'r2_input': os.path.join(base_dir, 'FASTQ', exp_id + '.R2.fastq.gz'),
         'input_filetype': 'gz', #Either 'gz' (so the script deals with compression) or 'fq'/'fastq' so it doesn't
-        'barcode_read_counts': os.path.join(base_dir, 'stats', 'barcode_read_counts.pickle'), #Temp file
-        'good_barcodes_with_names': os.path.join(base_dir, 'stats', 'good_barcodes_with_names.pickle'), #Temp file
-        'filtered_fastq': os.path.join(base_dir, 'S6D13-100.filtered.fastq'), #Fastq file after removal of bad reads, but before split
-        'barcode_histogram': os.path.join(base_dir, 'reads_from_barcodes.png')
-        'split_barcodes_dir': os.path.join(base_dir, 'barcodes'), #Directory where individual barcode fastqs will be placed
+        'barcode_read_counts': os.path.join(base_dir, 'analyses', exp_id, 'stats', 'barcode_read_counts.pickle'), #Temp file
+        'read_fail_counts': os.path.join(base_dir, 'analyses', exp_id, 'stats', 'read_fail_counts.pickle'), #Temp file
+        'good_barcodes_with_names': os.path.join(base_dir, 'analyses', exp_id, 'stats', 'good_barcodes_with_names.pickle'), #Temp file
+        'filtered_fastq': os.path.join(base_dir, 'analyses', 'filtered_fastqs', exp_id + '.filtered.fastq'), #Fastq file after removal of bad reads, but before split
+        'barcode_histogram': os.path.join(base_dir, 'analyses', exp_id, 'stats', 'reads_from_barcodes.png'),
+        'split_barcodes_dir': os.path.join(base_dir, 'analyses', exp_id, 'barcodes'), #Directory where individual barcode fastqs will be placed
         'bc1s': os.path.join(barcode_dir, 'gel_barcode1_list.txt'),
         'bc2s': os.path.join(barcode_dir, 'gel_barcode2_list.txt'),
-    
+    }
 
     #See the functiond description for these steps (I suggest running them one at a time)
     import sys
@@ -337,4 +411,6 @@ if __name__=="__main__":
             choose_good_barcodes(paths, threshold=int(sys.argv[2]))
         elif sys.argv[1] == 'split':
             split_reads_by_barcode(paths)
+        else:
+            print('not valid option')
 
