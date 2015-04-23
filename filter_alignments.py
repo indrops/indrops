@@ -10,6 +10,7 @@ def run(args):
     multiple_alignment_threshold = args.m
     distance_from_tx_end = args.d
     counts_output_handle = args.counts
+    fragments_output_handle = args.fragments
     split_ambiguities = args.split_ambi
     ambig_count_threshold = args.u
     using_mixed_ref = args.mixed_ref
@@ -20,22 +21,41 @@ def run(args):
     umis_for_geneset = defaultdict(set)
     sam_input = pysam.Samfile("-", "r" )
 
+    # tuple containing lengths of reference sequences
     ref_lengths = copy(sam_input.lengths)
+    # bam file to be generated
     sam_output = pysam.Samfile('-', "wb", template=sam_input)
 
+    # 
     def process_read_alignments(alignments):
-        #Transcript IDs
+        """input: one-element list of a single alignment from a bam file 
+        corresponding to a given barcode"""
+
+        #Transcript IDs in terms of reference names (NM_##|gene_name)
+        # this list will presumably contain copies of the same reference
+        # corresponding to different reads
         tx_ids = [sam_input.getrname(a.tid) for a in alignments]
+        # get length of reference name? not sure how this is useful
         tx_id_lens = [len(tx_id) for tx_id in tx_ids]
 
         #Map to Gene IDs
         g_ids = [tx_to_gid(tx_id) for tx_id in tx_ids]
+        # finally remove all copies to get a comprehensive unique list of genes
+        # found for this barcode
         genes = set(g_ids)
 
+        # does the alignment map to multiple genes or just one
         unique = True
+        # does the non_unique mapping turn out to be from a read
+        # that is slightly shifted relative to the source and therefore
+        # probably does represent a unique read after all?
         rescued_non_unique = False
+        # 
         failed_m_threshold = False
 
+        # it is currently unclear to me why this value would ever be greater
+        # than one, since only one alignment is being passed to
+        # process_read_alignments each time it's called...
         if 1 < len(genes):
             unique = False
 
@@ -94,18 +114,23 @@ def run(args):
 
     reads_by_umi = defaultdict(dict)
 
+    # defaultdict that will count identical fragments (to get a sense
+    # of whether sample was sequenced deeply enough)
+    identical_frags = defaultdict(int)
 
     rev = 0
     non_rev = 0
     for alignment in sam_input:
+
         #Skip alignments that failed to align...
         if alignment.tid == -1:
             continue
 
-        if not current_read == alignment.qname: #Bowtie is giving info about a different read, so let's process the last one before we proceed.
-            #We process the data from the previous read
-            if read_alignments: #Check that our read has any alignments
-
+        # weird loop that loads in first alignment data at the end of the
+        # first iteration, to be used as soon as the second starts.
+        if not current_read == alignment.qname: 
+            #Check that our read has any alignments
+            if read_alignments: 
                 chosen_alignments, processing_stats = process_read_alignments(read_alignments)
                 if chosen_alignments:
                     split_name = current_read.split(':')
@@ -115,6 +140,8 @@ def run(args):
                         umi = split_name[4] #Allon format
                     seq = read_alignments[0].seq
                     reads_by_umi[umi][seq] = chosen_alignments
+                    frag_id = umi + ':' + seq
+                    identical_frags[frag_id] += 1
 
                 uniq_count += processing_stats[0]
                 non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
@@ -122,13 +149,14 @@ def run(args):
                 failed_m_count += processing_stats[2]
 
             #We reset the current read info
+            # for a given alignment qname returns: "bc:umi"
             current_read = alignment.qname
             read_alignments = []
 
         read_alignments.append(alignment)
 
+    # only runs if preceding for loop terminated without break
     else:
-        #We might have left-over alignments when we are done 
         chosen_alignments, processing_stats = process_read_alignments(read_alignments)
         if chosen_alignments:
             split_name = current_read.split(':')
@@ -138,11 +166,14 @@ def run(args):
                 umi = split_name[4] #Allon format
             seq = read_alignments[0].seq
             reads_by_umi[umi][seq] = chosen_alignments
+            frag_id = umi + ':' + seq
+            identical_frags[frag_id] += 1
 
         uniq_count += processing_stats[0]
         non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
         rescued_count += processing_stats[1]
         failed_m_count += processing_stats[2]
+
     # -----------------------------
     # Time to filter based on UMIs
     # (and output)
@@ -268,6 +299,12 @@ def run(args):
     #     for k, v in ambig_clique_count.items():
     #         f.write('s%d = %s\n' % (k, str(set(v))))
 
+    # output identical fragment information
+    fragments_output_handle.write('%s\n' % '\t'.join(['Fragment ID', 'Counts']))
+    for k, v in identical_frags.items():
+        data_row = [str(k), str(v)]
+        fragments_output_handle.write('%s\n' % '\t'.join(data_row))
+    fragments_output_handle.close()
 
     #Output the fixing metrics
     sys.stderr.write("\nReads with unique mapping (%d), with unique after rescue (%d), with non unique (%d), failed m threshold (%d)" % (uniq_count, rescued_count, non_uniq_count, failed_m_count))
@@ -286,5 +323,6 @@ if __name__=="__main__":
     parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
     parser.add_argument('--mixed_ref', help="Reference is mixed, with records name 'gene:ref', should only keep reads that align to one ref.", action='store_true', default=False)
     parser.add_argument('--counts', type=argparse.FileType('w'))
+    parser.add_argument('--fragments', type=argparse.FileType('w'))
     args = parser.parse_args()
     run(args)
