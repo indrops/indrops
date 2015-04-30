@@ -7,7 +7,7 @@ import time
 
 #define job identifiers
 now = time.strftime("%y%m%d-%H%M")
-expt = "2KCL_b2"
+expt = "0KCL_b2"
 tag = "%s_%s_" % (now, expt)
 job = tag + "%s"
 
@@ -16,7 +16,7 @@ scripts = "/home/man36/dbseq"
 
 #path to log file
 logs = os.path.join(
-	"/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/150402_b2/logs",
+	"/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/150421_b2/logs",
 	job % "barcodeprocessing_LOG.txt")
 
 #submit filtering job
@@ -40,7 +40,7 @@ bsub3 = sh.bsub.bake(J=job % "choose_barcodes",
 	o=logs,
 	w="done(%s)" % (job % "histo"),
 	W="10:00", q="priority", R="select[mem>=16000] && rusage[mem=16000]", N=True)
-bsub3("python dropseq.py choose_barcodes")
+bsub3("python dropseq.py choose_barcodes 15000")
 
 time.sleep(5)
 
