@@ -306,7 +306,7 @@ def choose_good_barcodes(paths, threshold=15000):
 
     print(len(good_barcodes))
     barcode_names = {}
-    for i, bc in enumerate(sorted(good_barcodes, key=lambda b: barcode_read_counter[bc], reverse=True)):
+    for i, bc in enumerate(sorted(good_barcodes, key=lambda b: barcode_read_counter[b], reverse=True)):
         barcode_names[bc] = 'bc%d' % (i+1)
 
     with open(paths['good_barcodes_with_names'], 'w') as f:
@@ -341,6 +341,7 @@ def split_reads_by_barcode(paths):
                     j = 0
                     pre_write = defaultdict(list)
 
+    #Make sure we write anything possibly left in 'pre_write'
     for fn, chunks in pre_write.items():
         with open(fn, 'a') as out:
             for chunk in chunks:
