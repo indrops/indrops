@@ -30,8 +30,7 @@ if __name__=="__main__":
     args = parser.parse_args()
 
     # define paths
-    base_dir = os.path.join('/groups/neuroduo/Aurel/dawnchorus/' + \
-                            'dawnchorus_data/dropseq/150421_b2/analyses', 
+    base_dir = os.path.join('/n/regal/melton_lab/adrianveres/sequencing_libraries/islet_indrops/analyses/', 
                             args.filename)
     fastq_dir = os.path.join(base_dir, 'barcodes', 'fastq')
     trimmed_fastq_dir = os.path.join(base_dir, 'barcodes', 'trimmed')
@@ -44,8 +43,15 @@ if __name__=="__main__":
                  bam_dir, counts_dir, unal_dir, frag_dir]:
         check_dir(path)
 
+    # Maybe we have an array ID, hacky and only work on SLURM/Odyssey
+    array_size = args.n
+    if 'SLURM_ARRAY_TASK_ID' in os.environ:
+        array_position = int(os.environ['SLURM_ARRAY_TASK_ID'])
+    else:
+        array_position = args.c
+
     # work on user-defined chunk of barcodes
-    for i in range(1+(args.n*args.c), 1+(args.n*(args.c+1))):
+    for i in range(1+(array_size*array_position), 1+(array_size*(array_position+1))):
         # logging what barcodes have been processed so far
         print_err('')
         print_err('-----')
@@ -53,7 +59,7 @@ if __name__=="__main__":
         print_err('-----')
         cmd_params = {
 
-            'index': '/home/man36/genomes/allon/mm10_refseq_annotated',
+            'index': '/n/beta_cell/Users/adrianveres/dropseq_data/hg19/hg19.transcripts.annotated',
             'fastq_file': os.path.join(fastq_dir, 'bc%d.fastq' % i),
             'trimmed_fastq_file': os.path.join(trimmed_fastq_dir, 
                                                'bc%d.trimmed.fastq' % i),
@@ -61,11 +67,11 @@ if __name__=="__main__":
             'counts_file': os.path.join(counts_dir, 'bc%d.counts' % i),
             'unal_file': os.path.join(unal_dir, 'bc%d.unal.fastq' % i),
             'frags_file': os.path.join(frag_dir, 'bc%d.frag' % i),
-            'python': '/home/man36/venvs/env2/bin/python',
-            'filter': '/home/man36/dawnchorus/scripts/dbseq/' + \
+            'python': '/n/home15/adrianveres/envs/py27/bin/python',
+            'filter': '/n/beta_cell/Users/adrianveres/Dropseq/' + \
                       'filter_alignments.py',
-            'bowtie': '/opt/bowtie-1.1.1/bowtie',
-            'trimmomatic' : '/opt/Trimmomatic-0.32/trimmomatic-0.32.jar',
+            'bowtie': '/n/sw/fasrcsw/apps/Core/bowtie/1.1.1-fasrc01/bowtie',
+            'trimmomatic' : '/n/sw/centos6/Trimmomatic-0.32/trimmomatic-0.32.jar',
 
         }
 
@@ -102,3 +108,4 @@ if __name__=="__main__":
             subprocess.call(count_cmd, shell=True)
         else:
             print('FASTQ FILE %s NOT FOUND ' % i)
+            print(cmd_params['fastq_file'])

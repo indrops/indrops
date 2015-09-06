@@ -18,6 +18,7 @@ import re
 # combination: Return r length subsequences of elements from the input iterable.
 from itertools import product, combinations
 import time
+import matplotlib
 
 def string_hamming_distance(str1, str2):
     """
@@ -114,11 +115,12 @@ def process_reads(name, read, polyT_len=7, hamming_threshold=3,
     rev_w1 = "AAGGCGTCACAAGCAATCACTC"
     polyA = "A"*8
     
-    if rev_w1 in read:
-        return False, 'W1_in_R2'
+    # NOTE - if R2 is very long, this is likely to remove many valid reads!
+    # if rev_w1 in read:
+    #     return False, 'W1_in_R2'
 
-    if polyA in read:
-        return False, 'PolyA_in_R2'
+    # if polyA in read:
+    #     return False, 'PolyA_in_R2'
 
     #Check for polyT signal at 3' end.
     poly_t = name[-polyT_len:]
@@ -280,8 +282,8 @@ def barcode_histogram(paths):
     w = x*y
 
     # need to use Agg backend (which is noninteractive) on cluster
-    if('IN_ORCHESTRA' in os.environ):
-        matplotlib.use('Agg')
+    # if('IN_ORCHESTRA' in os.environ):
+    matplotlib.use('Agg')
         
     from matplotlib import pyplot as plt
     ax = plt.subplot(111)
@@ -372,14 +374,14 @@ def check_dir(path):
 if __name__=="__main__":
     
     #Change to relevant directory
-    base_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/'
+    base_dir = '/n/regal/melton_lab/adrianveres/sequencing_libraries/islet_indrops'
 
     #Where you have the two barcode lists
-    barcode_dir = '/groups/neuroduo/Aurel/dawnchorus/dawnchorus_data/dropseq/barcode_lists/'
+    barcode_dir = '/n/beta_cell/Users/adrianveres/dropseq_data/'
 
     # change to relevant experiment ID (no suffixes)
-    exp_id = 'dropseq_2KCL'
-
+    exp_id = 'islets_09_04_miseq'
+    
     # generate directories for analysis outputs (unless it already exists)
     check_dir(os.path.join(base_dir, "analyses"))
     check_dir(os.path.join(base_dir, "analyses", exp_id))
@@ -388,8 +390,8 @@ if __name__=="__main__":
     check_dir(os.path.join(base_dir, "analyses", 'filtered_fastqs'))
     
     paths = {
-        'r1_input': os.path.join(base_dir, 'FASTQ', exp_id + '.R1.fastq.gz'),
-        'r2_input': os.path.join(base_dir, 'FASTQ', exp_id + '.R2.fastq.gz'),
+        'r1_input': os.path.join(base_dir, 'raw', exp_id + '.R1.fastq.gz'),
+        'r2_input': os.path.join(base_dir, 'raw', exp_id + '.R2.fastq.gz'),
         'input_filetype': 'gz', #Either 'gz' (so the script deals with compression) or 'fq'/'fastq' so it doesn't
         'barcode_read_counts': os.path.join(base_dir, 'analyses', exp_id, 'stats', 'barcode_read_counts.pickle'), #Temp file
         'read_fail_counts': os.path.join(base_dir, 'analyses', exp_id, 'stats', 'read_fail_counts.pickle'), #Temp file
