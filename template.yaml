@@ -1,0 +1,42 @@
+project_prefix: "template"
+project_paths:
+    raw_R1_fastq : "/path/to/project/R1.fastq"
+    raw_R2_fastq : "/path/to/project/R2.fastq"
+    bowtie_index_prefix: "/path/to/reference_data/bowtie_index/" # This is the argument you provided in 'python indrops.py transcript.fast path_to_index'
+    output_dir : "/path/to/project/output/"
+        # The output will contain the following directories
+        # 'pre_split': for storage of the processed, but unsplit fastq file
+        # 'stats': for storage of various alignment metrics
+        # 'post_split': for storage of per-barcode data
+        # 'aggregated_counts': for storage of aggregated counts data
+
+general_paths:
+    # Reference Files needed for analysis
+    gel_barcode1_list : "/path/to/reference_data/barcode_lists/gel_barcode1_list.txt"
+    gel_barcode2_list : "/path/to/reference_data/barcode_lists/gel_barcode2_list.txt"
+    # Software Paths
+    bowtie : "" #Directory containing bowtie executable. Leave blank if already on path.
+    trimmomatic: "/path/to/Trimmomatic-0.33/trimmomatic-0.33.jar" #Path to trimmomatic Jar. (ie. /n/sw/centos6/Trimmomatic-0.32/trimmomatic-0.32.jar)
+
+bowtie_arguments:
+    m : 200
+    n : 1
+    l : 15
+    e : 1000
+
+trimmomatic_arguments:
+    LEADING: "28"
+    SLIDINGWINDOW: "4:20"
+    MINLEN: "16"
+
+umi_quantification_arguments:
+    m : 10 #Ignore reads with more than M alignments, after filtering on distance from transcript end.
+    u : 2 #Ignore counts from UMI that should be split among more than U genes.
+    d : 400 #Maximal distance from transcript end, NOT INCLUDING THE POLYA TAIL
+    split-ambigs: False #If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)
+
+output_arguments:
+    output_alignment_to_bam: False
+    output_unaligned_reads_to_other_fastq: False
+    output_oversequencing_metrics: False
+    output_umifm_calculation_metrics: False
