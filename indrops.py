@@ -533,12 +533,26 @@ class IndropsAnalysis():
 
         full_gene_list = set()
 
+        print_to_log('Begun aggregating barcodes. Numbers printed below are the (0-indexed) indices of failed cells, that should be re-quantified.')
         for barcode in sorted_barcode_names:
+            
             counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
 
-            with open(counts_filename, 'r') as f:
+            # Check that the file we expect is actually there
+            if not os.path.isfile(counts_filename):
+                print_to_log(str(int(barcode[2:])-1))
+                continue
 
-                header = next(f).rstrip('\n').split('\t')
+            with open(counts_filename, 'r') as f:
+                
+                # If we have an empty file, reading the header will raise 'StopIteration'
+                # so we can catch it here
+                try:
+                    header = next(f).rstrip('\n').split('\t')
+                except StopIteration:
+                    print_to_log(str(int(barcode[2:])-1))
+                    continue
+
                 for line in f:
                     row = line.rstrip('\n').split('\t')
                     gene = row[0]
@@ -553,8 +567,12 @@ class IndropsAnalysis():
                         ambig_counts_data[gene][barcode] = ambig_counts
                     ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
 
-        output_file = open(os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt'), 'w')
-        ambig_file = open(os.path.join(self.output_paths['aggregated_counts'], 'ambig_counts.txt'), 'w')
+
+        print_to_log('Finished processing')
+        output_filename = os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt')
+        output_file = open(output_filename, 'w')
+        ambig_filename = os.path.join(self.output_paths['aggregated_counts'], 'ambig_counts.txt')
+        ambig_file = open(ambig_filename, 'w')
 
         output_header = ['gene'] + ['Sum_counts', 'Sum_ambig', 'Ambigs'] + sorted_barcode_names
         to_output_line = lambda row: '%s\n' % '\t'.join([str(r) for r in row])
@@ -562,6 +580,7 @@ class IndropsAnalysis():
         output_file.write(to_output_line(output_header))
         ambig_file.write(to_output_line(output_header))
 
+        print_to_log('Starting output')
         for gene in sorted(full_gene_list):
             per_sample_counts = [counts_data[gene][s] for s in sorted_barcode_names]
             per_sample_ambig_counts = [ambig_counts_data[gene][s] for s in sorted_barcode_names]
@@ -572,6 +591,7 @@ class IndropsAnalysis():
             output_file.write(to_output_line(counts_row))
             ambig_file.write(to_output_line(ambig_counts_row))
 
+        print_to_log('Aggregation completed in %s' % output_filename)
 
 def build_transcriptome_from_ENSEMBL_files(input_fasta_filename, bowtie_index_prefix,
     gtf_filename="", 
