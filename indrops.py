@@ -141,6 +141,26 @@ def print_to_log(msg):
     """
     sys.stderr.write(str(msg)+'\n')
 
+def parallelized_using_workers(original_func):
+
+    def func_wrapper(self, barcodes_per_worker=0, worker_index=0, **kwargs):
+        with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
+                sorted_barcode_names = sorted(pickle.load(f).values())
+
+        if barcodes_per_worker == 0:
+            barcodes_per_worker = len(sorted_barcode_names)+1
+
+        for i in range(worker_index*barcodes_per_worker, (worker_index+1)*barcodes_per_worker):
+            if i >= len(sorted_barcode_names):
+                break
+            chosen_barcode = sorted_barcode_names[i]
+
+            # Actually execute the method being wrapped!
+            original_func(self, chosen_barcode)
+
+    return func_wrapper
+
+
 # -----------------------
 #
 # Core objects
@@ -407,8 +427,9 @@ class IndropsAnalysis():
 
         print_to_log('Keeping %d barcodes.' % len(barcode_names))
 
-    def split_reads_by_barcode(self):
+    def split_reads_by_barcode(self, output_unassigned_reads=False):
         """
+        # TODO : Connect 'output_unassigned_reads' to outside parameters!
         Starts with the list of good barcodes and the filtered FastQ
         Splits the filtered FastQ into one FastQ file per read. 
         """
@@ -419,6 +440,8 @@ class IndropsAnalysis():
         for fn in os.listdir(self.output_paths['split_fastq_dir']):
             os.remove(os.path.join(self.output_paths['split_fastq_dir'], fn))
 
+        total_processed_reads = 0
+        start_time = time.time()
 
         pre_write_buffer_size = 0
         pre_write = defaultdict(list)
@@ -427,6 +450,7 @@ class IndropsAnalysis():
         with open(self.output_paths['filtered_fastq'], 'r') as input_fastq:
             for name, seq, qual in from_fastq(input_fastq):
                 pre_write_buffer_size += 1
+                total_processed_reads += 1
                 bc, umi = name.split(':')
                 
                 if bc in barcode_names:
@@ -434,7 +458,7 @@ class IndropsAnalysis():
                     filename = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % bc_name)
                     pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
 
-                else:
+                elif output_unassigned_reads:
                     pre_write[unassigned_filename].append(to_fastq_lines(bc, umi, seq, qual))
 
 
@@ -446,12 +470,17 @@ class IndropsAnalysis():
                     pre_write_buffer_size = 0
                     pre_write = defaultdict(list)
 
+                if total_processed_reads % 1000000 == 0:
+                    sec_per_mil = (time.time()-start_time)/(float(total_processed_reads)/10**6)
+                    print_to_log('%d reads processed, %.02f seconds per M reads.' % (total_processed_reads, sec_per_mil))
+
         #Make sure we write anything possibly left in 'pre_write'
         for fn, chunks in pre_write.items():
             with open(fn, 'a') as out:
                 for chunk in chunks:
                     out.write(chunk)
 
+    @parallelized_using_workers
     def quantify_expression_for_barcode(self, barcode):
 
         fastq_input = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % barcode)
@@ -496,6 +525,7 @@ class IndropsAnalysis():
             '-m', str(self.parameters['umi_quantification_arguments']['m']),
             '-u', str(self.parameters['umi_quantification_arguments']['u']),
             '-d', str(self.parameters['umi_quantification_arguments']['d']),
+            '--min_non_polyA', str(self.parameters['umi_quantification_arguments']['min_non_polyA']),
             '--counts', counts_output,
         ]
         if self.parameters['umi_quantification_arguments']['split-ambigs']:
@@ -503,7 +533,7 @@ class IndropsAnalysis():
         if self.parameters['output_arguments']['output_oversequencing_metrics']:
             quant_cmd += ['--umifm_oversequencing', oversequencing_metrics_output]
         if self.parameters['output_arguments']['output_umifm_calculation_metrics']:
-            quant_cmd += ['--metrics', oversequencing_metrics_output]
+            quant_cmd += ['--metrics', output_umifm_calculation_metrics]
 
 
         final_pipe = aligned_bam_output if self.parameters['output_arguments']['output_alignment_to_bam'] else '/dev/null'
@@ -511,17 +541,6 @@ class IndropsAnalysis():
 
         subprocess.call(final_cmd, shell=True)
 
-    def quantification_wrapper(self, barcodes_per_worker=0, worker_index=0):
-        with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
-            sorted_barcode_names = sorted(pickle.load(f).values())
-
-        if barcodes_per_worker == 0:
-            barcodes_per_worker = len(sorted_barcode_names)+1
-        for i in range(worker_index*barcodes_per_worker, (worker_index+1)*barcodes_per_worker):
-            if i >= len(sorted_barcode_names):
-                break
-            chosen_barcode = sorted_barcode_names[i]
-            self.quantify_expression_for_barcode(chosen_barcode)
 
     def aggregate_counts(self):
         with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
@@ -533,14 +552,18 @@ class IndropsAnalysis():
 
         full_gene_list = set()
 
-        print_to_log('Begun aggregating barcodes. Numbers printed below are the (0-indexed) indices of failed cells, that should be re-quantified.')
+        print_to_log('Started aggregating barcodes.')
+        i = 0
+        missing_barcodes = []
         for barcode in sorted_barcode_names:
-            
+            i += 1
+            if (i % 100)== 0:
+                print_to_log('Read %d barcodes.' % i)
             counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
 
             # Check that the file we expect is actually there
             if not os.path.isfile(counts_filename):
-                print_to_log(str(int(barcode[2:])-1))
+                missing_barcodes.append(barcode)
                 continue
 
             with open(counts_filename, 'r') as f:
@@ -566,6 +589,10 @@ class IndropsAnalysis():
                     if ambig_counts > 0:
                         ambig_counts_data[gene][barcode] = ambig_counts
                     ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
+
+        print_to_log('Missed the following barcodes: '+ ','.join(missing_barcodes))
+        print_to_log('Corresponding indices: ')
+        print_to_log(' '.join([str(int(bc[2:])-1) for bc in missing_barcodes]))
 
 
         print_to_log('Finished processing')
@@ -593,6 +620,26 @@ class IndropsAnalysis():
 
         print_to_log('Aggregation completed in %s' % output_filename)
 
+    @parallelized_using_workers
+    def sort_and_index_bam(self, chosen_barcode):
+
+        aligned_bam = os.path.join(self.output_paths['split_quant_dir'], '%s.aligned.bam' % chosen_barcode)
+        genomic_bam = os.path.join(self.output_paths['split_quant_dir'], '%s.genomic.bam' % chosen_barcode)
+        sorted_bam = os.path.join(self.output_paths['split_quant_dir'], '%s.genomic.sorted.bam' % chosen_barcode)
+
+        if os.path.isfile(aligned_bam):
+            samtools_exec = os.path.join(self.user_paths['samtools'], 'samtools')
+            rsem = os.path.join(self.user_paths['rsem'], 'rsem-tbam2gbam')
+
+            rsem_transcriptome_to_bam_cmd = [rsem, self.user_paths['bowtie_index_prefix'], aligned_bam, genomic_bam]
+            sort_cmd = [samtools_exec, 'sort', '-o', sorted_bam, '-O', 'bam', '-T', chosen_barcode+'.temp', genomic_bam]
+            index_cmd = [samtools_exec, 'index', sorted_bam]
+
+            subprocess.call(rsem_transcriptome_to_bam_cmd)
+            subprocess.call(sort_cmd)
+            subprocess.call(index_cmd)
+        else:
+            print_to_log('File not found: ' + aligned_bam)
 def build_transcriptome_from_ENSEMBL_files(input_fasta_filename, bowtie_index_prefix,
     gtf_filename="", 
     polyA_tail_length=50,
@@ -732,6 +779,12 @@ if __name__=="__main__":
     parser_aggregate = subparsers.add_parser('aggregate')
     parser_aggregate.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
 
+    parser_sort_bam = subparsers.add_parser('sort_bam')
+    parser_sort_bam.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
+    parser_sort_bam.add_argument('--barcodes-per-worker', type=int, help='Barcodes to be processed by each worker.', default=0)
+    parser_sort_bam.add_argument('--worker-index', type=int, help='Index of current worker. (Starting at 0). Make sure max(worker-index)*(barcodes-per-worker) > total barcodes.', default=0)
+
+
     args = parser.parse_args()
 
     if args.command == 'index':
@@ -751,7 +804,9 @@ if __name__=="__main__":
             analysis.choose_good_barcodes(args.read_count_threshold)
             analysis.split_reads_by_barcode()
         elif args.command == 'quantify':
-            analysis.quantification_wrapper(args.barcodes_per_worker, args.worker_index)
+            analysis.quantify_expression_for_barcode(args.barcodes_per_worker, args.worker_index)
         elif args.command == 'aggregate':
             analysis.aggregate_counts()
+        elif args.command == 'sort_bam':
+            analysis.sort_and_index_bam(args.barcodes_per_worker, args.worker_index)
         

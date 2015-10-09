@@ -34,6 +34,24 @@ def quant(args):
         """input: one-element list of a single alignment from a bam file 
         corresponding to a given barcode"""
 
+        # Remove any alignments that aren't supported by a certain number of non-poly A bases!
+        if args.min_non_polyA > 0:
+            polyA_independent_alignments = []
+            for a in alignments:
+                start_of_polyA = ref_lengths[a.tid] - args.polyA
+                if a.aend < start_of_polyA:
+                    # The alignment doesn't overlap the polyA tail. 
+                    polyA_independent_alignments.append(a)
+                else:
+                    non_polyA_part = start_of_polyA - a.pos
+                    if non_polyA_part > args.min_non_polyA:
+                        polyA_independent_alignments.append(a)
+
+            dependent_on_polyA_tail = len(polyA_independent_alignments) == 0
+            alignments = polyA_independent_alignments
+
+
+
         # We need to obtain Transcript IDs in terms of reference names (Transcrupt_ID|Gene_ID)
         # as opposed to the arbitrary 'a.tid' number
         tx_ids = [sam_input.getrname(a.tid) for a in alignments]
@@ -69,11 +87,13 @@ def quant(args):
 
         #Choose 1 alignment per gene, that we will write to the output BAM.
         chosen_alignments = {}
+        keep_read = 0 < len(genes) <= multiple_alignment_threshold
+
+        # We need different logic if we are using a mixed organism reference
         if using_mixed_ref:
             refs = set(g.split(':')[1] for g in genes)
             keep_read = (len(refs) == 1) and (0 < len(genes) <= multiple_alignment_threshold)
-        else:
-            keep_read = 0 < len(genes) <= multiple_alignment_threshold
+            
 
         if keep_read:
             for gene in genes:
@@ -84,7 +104,7 @@ def quant(args):
         else:
             failed_m_threshold = True
 
-        read_filter_status = (unique, rescued_non_unique, failed_m_threshold)
+        read_filter_status = (unique, rescued_non_unique, failed_m_threshold, dependent_on_polyA_tail)
         return chosen_alignments, read_filter_status
 
     # --------------------------
@@ -256,8 +276,12 @@ def quant(args):
             if bool(args.umifm_oversequencing) & umifm_assigned_unambiguously:
 
                 alignment = best_alignment_for_gene[g]
+
+                ref_length = ref_lengths[alignment.tid]
+                alignment_start = alignment.pos
+                alignment_end = alignment.aend
                 dist_from_end = ref_lengths[alignment.tid] - alignment.aend
-                oversequencing.append((read_count_for_umifm, g, umi, dist_from_end))
+                oversequencing.append((read_count_for_umifm, g, umi, ref_length, alignment_start, alignment_end))
                 # oversequencing.append((read_count_for_umifm, g, umi, dist_from_end, '-'.join(umifm_reads)))
 
 
@@ -274,9 +298,9 @@ def quant(args):
             ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
 
     if args.umifm_oversequencing:
-        args.umifm_oversequencing.write('Reads in UMIFM, Gene, Distance from Transcript end') 
-        for rc, g, umi, dist_from_end in oversequencing:
-            args.umifm_oversequencing.write('%d,%s,%d\n' % (rc, g, dist_from_end))
+        args.umifm_oversequencing.write('Reads in UMIFM,Gene,Reference Length,Alignment Start,Alignment End\n') 
+        for metadata in oversequencing:
+            args.umifm_oversequencing.write(','.join([str(x) for x in metadata]) + '\n')
 
     #Output the counts per gene
     all_genes = set()
@@ -305,12 +329,12 @@ def quant(args):
             args.metrics.write('%d\t%d\n' % (k-1, len(v)))
 
 
-    else:
-        sys.stderr.write("\nReads with unique mapping (%d), with unique after rescue (%d), with non unique (%d), failed m threshold (%d)" % (uniq_count, rescued_count, non_uniq_count, failed_m_count))
-        sys.stderr.write("\n")
-        sys.stderr.write("Number of counts with degree of ambiguity:\n")
-        for k, v in ambig_clique_count.items():
-            sys.stderr.write(' %d : %d\n' % (k-1, len(v)))
+    
+    print_to_log("\nReads with unique mapping (%d), with unique after rescue (%d), with non unique (%d), failed m threshold (%d)" % (uniq_count, rescued_count, non_uniq_count, failed_m_count))
+    print_to_log("\n")
+    print_to_log("Number of counts with degree of ambiguity:\n")
+    for k, v in ambig_clique_count.items():
+        sys.stderr.write(' %d : %d\n' % (k-1, len(v)))
 
 
 if __name__=="__main__":
@@ -319,9 +343,11 @@ if __name__=="__main__":
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
     parser.add_argument('-u', help='Ignore counts from UMI that should be split among more than U genes.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
+    parser.add_argument('--polyA', help='Length of polyA tail in reference transcriptome.', type=int, default=125)
     parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
     parser.add_argument('--mixed_ref', help="Reference is mixed, with records named 'gene:ref', should only keep reads that align to one ref.", action='store_true', default=False)
     parser.add_argument('--counts', type=argparse.FileType('w'))
+    parser.add_argument('--min_non_polyA', type=int, default=0)
     parser.add_argument('--umifm_oversequencing', type=argparse.FileType('w'), nargs='?')
     parser.add_argument('--metrics', type=argparse.FileType('w'), nargs='?')
     args = parser.parse_args()
