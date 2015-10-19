@@ -70,7 +70,7 @@ def quant(args):
         # Even after rescue, was the alignment mapping to more than M genes?
         failed_m_threshold = False
 
-        # The same read could align to transcripts from different reads. 
+        # The same read could align to transcripts from different genes. 
         if 1 < len(genes):
             unique = False
 

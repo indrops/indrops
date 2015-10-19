@@ -259,8 +259,13 @@ class IndropsAnalysis():
         """
 
         is_gz_compressed = False
+        is_bz_compressed = False
         if r1_fastq.split('.')[-1] == 'gz' and r2_fastq.split('.')[-1] == 'gz':
             is_gz_compressed = True
+            
+        #Added bz2 support VS
+        if r1_fastq.split('.')[-1] == 'bz2' and r2_fastq.split('.')[-1] == 'bz2':
+            is_bz_compressed = True
 
         # Decompress Gzips using subprocesses because python gzip is incredibly slow.
         if is_gz_compressed:    
@@ -268,6 +273,11 @@ class IndropsAnalysis():
             r1_stream = r1_gunzip.stdout
             r2_gunzip = subprocess.Popen("gzip --stdout -d %s" % (r2_fastq), shell=True, stdout=subprocess.PIPE)
             r2_stream = r2_gunzip.stdout
+        elif is_bz_compressed:
+            r1_bunzip = subprocess.Popen("bzcat %s" % (r1_fastq), shell=True, stdout=subprocess.PIPE)
+            r1_stream = r1_bunzip.stdout
+            r2_bunzip = subprocess.Popen("bzcat %s" % (r2_fastq), shell=True, stdout=subprocess.PIPE)
+            r2_stream = r2_bunzip.stdout
         else:
             r1_stream = open(r1_fastq, 'r')
             r2_stream = open(r2_fastq, 'r')
@@ -327,10 +337,11 @@ class IndropsAnalysis():
         #     return False, 'PolyA_in_R2'
 
         # Check for polyT signal at 3' end.
-        # 47 is the length of BC1+W1+BC2+UMI, given the longest PolyT
-        expected_poly_t = name[47:47+minimal_polyT_len_on_R1:]
-        if string_hamming_distance(expected_poly_t, 'T'*minimal_polyT_len_on_R1) > 3:
-            return False, 'No_polyT'
+        # 44 is the length of BC1+W1+BC2+UMI, given the longest PolyT
+        #BC1: 8-11 bases
+		#W1 : 22 bases
+		#BC2: 8 bases
+		#UMI: 6 bases
 
         # check for empty reads (due to adapter trimming)
         if not read:
@@ -340,7 +351,11 @@ class IndropsAnalysis():
         #Allow for up to hamming_threshold errors
         if w1 in name:
             w1_pos = name.find(w1)
+#             Nstart=0
+#             if name.startswith('N')
+#             	Nstart=1
             if not 7 < w1_pos < 12:
+                print_to_log(name)
                 return False, 'No_W1'
         else:
             #Try to find W1 adapter at start positions 8-11
@@ -350,10 +365,18 @@ class IndropsAnalysis():
                     break
             else:
                 return False, 'No_W1'
+                
+    	bc2_pos=w1_pos+22
+    	umi_pos=bc2_pos+8
+    	polyTpos=umi_pos+6
+    	#was:expected_poly_t = name[44:44+minimal_polyT_len_on_R1:]
+    	expected_poly_t = name[polyTpos:polyTpos+minimal_polyT_len_on_R1]
+    	if string_hamming_distance(expected_poly_t, 'T'*minimal_polyT_len_on_R1) > 3:
+    	         return False, 'No_polyT'
             
-        bc1 = name[:w1_pos]
-        bc2 = str(name[w1_pos+22:w1_pos+22+8])
-        umi = str(name[w1_pos+22+8: w1_pos+22+8+6])
+        bc1 = str(name[:w1_pos])
+        bc2 = str(name[bc2_pos:umi_pos])
+        umi = str(name[umi_pos:umi_pos+7])
         
         #Validate barcode (and try to correct when there is no ambiguity)
         if valid_bc1s and valid_bc2s:
