@@ -175,6 +175,10 @@ class IndropsAnalysis():
         self.user_paths = parameters['project_paths']
         self.user_paths.update(parameters['general_paths'])
 
+        # Add defaults for any newly added parameters.
+        if 'min_non_polyA' not in self.parameters['umi_quantification_arguments']:
+            self.parameters['umi_quantification_arguments']['min_non_polyA'] = 0
+
         self.output_paths = {
             'read_fail_counts': 'stats/filtering_metrics.yaml',
             'barcode_histogram': 'stats/barcode_abundance_histogram.png',
@@ -355,7 +359,7 @@ class IndropsAnalysis():
 #             if name.startswith('N')
 #             	Nstart=1
             if not 7 < w1_pos < 12:
-                print_to_log(name)
+                # print_to_log(name)
                 return False, 'No_W1'
         else:
             #Try to find W1 adapter at start positions 8-11
