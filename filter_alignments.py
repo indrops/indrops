@@ -52,7 +52,7 @@ def quant(args):
         # Even after rescue, was the alignment mapping to more than M genes?
         failed_m_threshold = False
 
-        # The same read could align to transcripts from different reads. 
+        # The same read could align to transcripts from different genes. 
         if 1 < len(genes):
             unique = False
 
@@ -274,7 +274,7 @@ def quant(args):
             ambig_umi_counts[gene] += (1./split_between if ambigs>1 else 0)
 
     if args.umifm_oversequencing:
-        args.umifm_oversequencing.write('Reads in UMIFM, Gene, Distance from Transcript end') 
+        args.umifm_oversequencing.write('Reads in UMIFM, Gene, Distance from Transcript end\n') 
         for rc, g, umi, dist_from_end in oversequencing:
             args.umifm_oversequencing.write('%d,%s,%d\n' % (rc, g, dist_from_end))
 

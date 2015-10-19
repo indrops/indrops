@@ -3,6 +3,7 @@ import itertools
 import operator
 from collections import defaultdict
 import errno
+import datetime
 
 # cPickle is a faster version of pickle that isn't installed in python3
 # inserted try statement just in case
@@ -234,13 +235,18 @@ class IndropsAnalysis():
 
     def _weave_fastqs(self, r1_fastq, r2_fastq):
         """
-        Merge 2 FastQ files by returning paired reads for each.
+        f 2 FastQ files by returning paired reads for each.
         Returns only R1_seq, R2_seq and R2_qual.
         """
 
         is_gz_compressed = False
+        is_bz_compressed = False
         if r1_fastq.split('.')[-1] == 'gz' and r2_fastq.split('.')[-1] == 'gz':
             is_gz_compressed = True
+            
+        #Added bz2 support VS
+        if r1_fastq.split('.')[-1] == 'bz2' and r2_fastq.split('.')[-1] == 'bz2':
+            is_bz_compressed = True
 
         # Decompress Gzips using subprocesses because python gzip is incredibly slow.
         if is_gz_compressed:    
@@ -248,6 +254,11 @@ class IndropsAnalysis():
             r1_stream = r1_gunzip.stdout
             r2_gunzip = subprocess.Popen("gzip --stdout -d %s" % (r2_fastq), shell=True, stdout=subprocess.PIPE)
             r2_stream = r2_gunzip.stdout
+        elif is_bz_compressed:
+            r1_bunzip = subprocess.Popen("bzcat %s" % (r1_fastq), shell=True, stdout=subprocess.PIPE)
+            r1_stream = r1_bunzip.stdout
+            r2_bunzip = subprocess.Popen("bzcat %s" % (r2_fastq), shell=True, stdout=subprocess.PIPE)
+            r2_stream = r2_bunzip.stdout
         else:
             r1_stream = open(r1_fastq, 'r')
             r2_stream = open(r2_fastq, 'r')
@@ -307,10 +318,11 @@ class IndropsAnalysis():
         #     return False, 'PolyA_in_R2'
 
         # Check for polyT signal at 3' end.
-        # 47 is the length of BC1+W1+BC2+UMI, given the longest PolyT
-        expected_poly_t = name[47:47+minimal_polyT_len_on_R1:]
-        if string_hamming_distance(expected_poly_t, 'T'*minimal_polyT_len_on_R1) > 3:
-            return False, 'No_polyT'
+        # 44 is the length of BC1+W1+BC2+UMI, given the longest PolyT
+        #BC1: 8-11 bases
+		#W1 : 22 bases
+		#BC2: 8 bases
+		#UMI: 6 bases
 
         # check for empty reads (due to adapter trimming)
         if not read:
@@ -320,7 +332,11 @@ class IndropsAnalysis():
         #Allow for up to hamming_threshold errors
         if w1 in name:
             w1_pos = name.find(w1)
+#             Nstart=0
+#             if name.startswith('N')
+#             	Nstart=1
             if not 7 < w1_pos < 12:
+                print_to_log(name)
                 return False, 'No_W1'
         else:
             #Try to find W1 adapter at start positions 8-11
@@ -330,10 +346,18 @@ class IndropsAnalysis():
                     break
             else:
                 return False, 'No_W1'
+                
+    	bc2_pos=w1_pos+22
+    	umi_pos=bc2_pos+8
+    	polyTpos=umi_pos+6
+    	#was:expected_poly_t = name[44:44+minimal_polyT_len_on_R1:]
+    	expected_poly_t = name[polyTpos:polyTpos+minimal_polyT_len_on_R1]
+    	if string_hamming_distance(expected_poly_t, 'T'*minimal_polyT_len_on_R1) > 3:
+    	         return False, 'No_polyT'
             
-        bc1 = name[:w1_pos]
-        bc2 = str(name[w1_pos+22:w1_pos+22+8])
-        umi = str(name[w1_pos+22+8: w1_pos+22+8+6])
+        bc1 = str(name[:w1_pos])
+        bc2 = str(name[bc2_pos:umi_pos])
+        umi = str(name[umi_pos:umi_pos+7])
         
         #Validate barcode (and try to correct when there is no ambiguity)
         if valid_bc1s and valid_bc2s:
@@ -467,19 +491,22 @@ class IndropsAnalysis():
         oversequencing_metrics_output = os.path.join(self.output_paths['split_quant_dir'], '%s.oversequencing' % barcode)
         unaligned_reads_output = os.path.join(self.output_paths['split_quant_dir'], '%s.unaligned.fastq' % barcode)
         aligned_bam_output = os.path.join(self.output_paths['split_quant_dir'], '%s.aligned.bam' % barcode)
-
+        stmp=str(time.time())
         # Build Trimmomatic Trim command
-        trimmomatic_cmd = ['java', '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, trimmed_fastq]
+        trimmomatic_cmd = ['bsub -q mini -W 0:10 -J','trim_'+stmp,self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, trimmed_fastq]
         for arg, val in self.parameters['trimmomatic_arguments'].items():
             trimmomatic_cmd.append('%s:%s' % (arg, val))
-
-        subprocess.call(trimmomatic_cmd)
+            
+        trimmomatic_cmd=' '.join(trimmomatic_cmd)
+        print trimmomatic_cmd
+        os.system(trimmomatic_cmd)
 
         # Build Alignment and Quantification command
         bowtie_exec = os.path.join(self.user_paths['bowtie'], 'bowtie')
-
+        bsub_wrap='bsub -q short -W 4:00 -w','trim_'+stmp,'-J','bowtie'+stmp
+#added random hexamer trimming
         bowtie_cmd = [bowtie_exec, self.user_paths['bowtie_index_prefix'], '-q', trimmed_fastq,
-            '-p', '1', '-a', '--best', '--strata', '--chunkmbs', '1000', '--norc', '--sam',
+            '-p', '1', '-a', '--best', '--strata', '--chunkmbs', '1000', '--norc', '--sam', '--trim5', '6',
             '-m', str(self.parameters['bowtie_arguments']['m']),
             '-n', str(self.parameters['bowtie_arguments']['n']),
             '-l', str(self.parameters['bowtie_arguments']['l']),
@@ -507,10 +534,12 @@ class IndropsAnalysis():
 
 
         final_pipe = aligned_bam_output if self.parameters['output_arguments']['output_alignment_to_bam'] else '/dev/null'
-        final_cmd = ' '.join(bowtie_cmd) + ' | ' + ' '.join(quant_cmd) + ' > ' + final_pipe
+        final_cmd = ' '.join(bsub_wrap)+' "'+' '.join(bowtie_cmd) + ' | ' + ' '.join(quant_cmd) + ' > ' + final_pipe + ' "'
 
-        subprocess.call(final_cmd, shell=True)
-
+        print final_cmd
+        os.system(final_cmd)
+        time.sleep(10)
+        
     def quantification_wrapper(self, barcodes_per_worker=0, worker_index=0):
         with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
             sorted_barcode_names = sorted(pickle.load(f).values())
@@ -538,6 +567,7 @@ class IndropsAnalysis():
 
             with open(counts_filename, 'r') as f:
 
+                print counts_filename
                 header = next(f).rstrip('\n').split('\t')
                 for line in f:
                     row = line.rstrip('\n').split('\t')
@@ -553,8 +583,10 @@ class IndropsAnalysis():
                         ambig_counts_data[gene][barcode] = ambig_counts
                     ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
 
-        output_file = open(os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt'), 'w')
-        ambig_file = open(os.path.join(self.output_paths['aggregated_counts'], 'ambig_counts.txt'), 'w')
+        output_filename = os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt')
+        output_file = open(output_filename, 'w')
+        ambig_filename = os.path.join(self.output_paths['aggregated_counts'], 'ambig_counts.txt')
+        ambig_file = open(ambig_filename, 'w')
 
         output_header = ['gene'] + ['Sum_counts', 'Sum_ambig', 'Ambigs'] + sorted_barcode_names
         to_output_line = lambda row: '%s\n' % '\t'.join([str(r) for r in row])
@@ -572,6 +604,7 @@ class IndropsAnalysis():
             output_file.write(to_output_line(counts_row))
             ambig_file.write(to_output_line(ambig_counts_row))
 
+        print_to_log('Aggregation completed in %s' % output_filename)
 
 def build_transcriptome_from_ENSEMBL_files(input_fasta_filename, bowtie_index_prefix,
     gtf_filename="", 
