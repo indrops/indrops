@@ -35,6 +35,7 @@ def quant(args):
         corresponding to a given barcode"""
 
         # Remove any alignments that aren't supported by a certain number of non-poly A bases!
+        dependent_on_polyA_tail = False
         if args.min_non_polyA > 0:
             polyA_independent_alignments = []
             for a in alignments:

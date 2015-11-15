@@ -179,6 +179,9 @@ class IndropsAnalysis():
         if 'min_non_polyA' not in self.parameters['umi_quantification_arguments']:
             self.parameters['umi_quantification_arguments']['min_non_polyA'] = 0
 
+        if 'java' not in self.user_paths:
+            self.user_paths['java'] = 'java'
+
         self.output_paths = {
             'read_fail_counts': 'stats/filtering_metrics.yaml',
             'barcode_histogram': 'stats/barcode_abundance_histogram.png',
@@ -521,11 +524,12 @@ class IndropsAnalysis():
         counts_output = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
         quant_metrics_output = os.path.join(self.output_paths['split_quant_dir'], '%s.quant_metrics' % barcode)
         oversequencing_metrics_output = os.path.join(self.output_paths['split_quant_dir'], '%s.oversequencing' % barcode)
+        output_umifm_calculation_metrics = os.path.join(self.output_paths['split_quant_dir'], '%s.umifm_stats' % barcode)
         unaligned_reads_output = os.path.join(self.output_paths['split_quant_dir'], '%s.unaligned.fastq' % barcode)
         aligned_bam_output = os.path.join(self.output_paths['split_quant_dir'], '%s.aligned.bam' % barcode)
 
         # Build Trimmomatic Trim command
-        trimmomatic_cmd = ['java', '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, trimmed_fastq]
+        trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, trimmed_fastq]
         for arg, val in self.parameters['trimmomatic_arguments'].items():
             trimmomatic_cmd.append('%s:%s' % (arg, val))
 
