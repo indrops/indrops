@@ -1,6 +1,6 @@
 import pysam
 from collections import defaultdict
-import cPickle
+import cPickle as pickle
 from copy import copy
 from itertools import combinations
 
@@ -30,11 +30,16 @@ def quant(args):
     # Bam file to be generated
     sam_output = pysam.Samfile('-', "wb", template=sam_input)
 
+    # Load cache of low complexity regions
+    low_complexity_mask = None
+    if args.low_complexity_mask:
+        low_complexity_mask = pickle.load(args.low_complexity_mask)
+
     def process_read_alignments(alignments):
         """input: one-element list of a single alignment from a bam file 
         corresponding to a given barcode"""
 
-        # Remove any alignments that aren't supported by a certain number of non-poly A bases!
+        # Remove any alignments that aren't supported by a certain number of non-poly A bases.
         dependent_on_polyA_tail = False
         if args.min_non_polyA > 0:
             polyA_independent_alignments = []
@@ -51,12 +56,20 @@ def quant(args):
             dependent_on_polyA_tail = len(polyA_independent_alignments) == 0
             alignments = polyA_independent_alignments
 
-
+        # Remove any alignments that are mostly to low complexity regions
+        if low_complexity_mask:
+            good_complexity_alignments = []
+            aligned_to_low_complexity_region = False
+            for a in alignments:
+                tx_id = sam_input.getrname(a.tid)
+                low_complexity_bases = low_complexity_mask[tx_id].intersection(set(range(a.pos, a.aend)))
+                if float(len(low_complexity_bases))/(a.aend - a.pos) < 0.5:
+                    good_complexity_alignments.append(a)
+            alignments = good_complexity_alignments
 
         # We need to obtain Transcript IDs in terms of reference names (Transcrupt_ID|Gene_ID)
         # as opposed to the arbitrary 'a.tid' number
         tx_ids = [sam_input.getrname(a.tid) for a in alignments]
-
 
         #Map to Gene IDs
         g_ids = [tx_to_gid(tx_id) for tx_id in tx_ids]
@@ -201,11 +214,13 @@ def quant(args):
         # - highest alignment quality 
         # - longest read
         best_alignment_for_gene = {}
+
         for gene, alignments in aligns_by_gene.items():
-            min_ambiguity_alignments = alignments[min(alignments.keys())]
-            max_qual = max(a.mapq for a in min_ambiguity_alignments)
-            max_qual_alignments = filter(lambda a: a.mapq==max_qual, min_ambiguity_alignments)
-            best_alignment_for_gene[gene] = max(max_qual_alignments, key=lambda a: a.qlen)
+            # min_ambiguity_alignments = alignments[min(alignments.keys())]
+            # max_qual = max(a.mapq for a in min_ambiguity_alignments)
+            # max_qual_alignments = filter(lambda a: a.mapq==max_qual, min_ambiguity_alignments)
+            # best_alignment_for_gene[gene] = max(max_qual_alignments, key=lambda a: a.qlen)
+            best_alignment_for_gene[gene] = alignments[min(alignments.keys())]
 
         # Compute hitting set
         g0 = set.union(*(set(gs) for gs in umi_reads.values())) #Union of the gene sets of all reads from that UMI
@@ -274,15 +289,15 @@ def quant(args):
                 target_genes[g] = 1.
                 ambig_clique_count[1].append(umi)
 
-            if bool(args.umifm_oversequencing) & umifm_assigned_unambiguously:
+            # if bool(args.umifm_oversequencing) & umifm_assigned_unambiguously:
 
-                alignment = best_alignment_for_gene[g]
+            #     alignment = best_alignment_for_gene[g]
 
-                ref_length = ref_lengths[alignment.tid]
-                alignment_start = alignment.pos
-                alignment_end = alignment.aend
-                dist_from_end = ref_lengths[alignment.tid] - alignment.aend
-                oversequencing.append((read_count_for_umifm, g, umi, ref_length, alignment_start, alignment_end))
+            #     ref_length = ref_lengths[alignment.tid]
+            #     alignment_start = alignment.pos
+            #     alignment_end = alignment.aend
+            #     dist_from_end = ref_lengths[alignment.tid] - alignment.aend
+            #     oversequencing.append((read_count_for_umifm, g, umi, ref_length, alignment_start, alignment_end))
                 # oversequencing.append((read_count_for_umifm, g, umi, dist_from_end, '-'.join(umifm_reads)))
 
 
@@ -292,7 +307,26 @@ def quant(args):
         #For each target gene, output the best alignment
         #and record umi count
         for gene, ambigs in target_genes.items():
-            sam_output.write(best_alignment_for_gene[gene])
+            supporting_alignments = best_alignment_for_gene[gene]
+            for alignment_for_output in best_alignment_for_gene[gene]:
+
+                # Add the following tags to aligned reads:
+                # XU - Identify of the UMI sequence
+                # XO - Oversequencing number (how many reads with the same UMI are assigned to this gene)
+                # XG - Gene identity
+                # XK - Start of the alignment, relative to the transcriptome
+                # XL - End of the alignment, relative to the transcriptome
+                # XT - Length of alignment transcript
+
+
+                alignment_for_output.setTag('XU', umi)
+                alignment_for_output.setTag('XO', len(supporting_alignments))
+                alignment_for_output.setTag('XG', gene)
+                alignment_for_output.setTag('XK', int(alignment_for_output.pos))
+                alignment_for_output.setTag('XL', int(alignment_for_output.aend))
+                alignment_for_output.setTag('XT', int(ref_lengths[alignment.tid]))
+                sam_output.write(alignment_for_output)
+            # sam_output.write(best_alignment_for_gene[gene])
             
             split_between = ambigs if split_ambiguities else 1.
             umi_counts[gene] += 1./split_between
@@ -315,7 +349,13 @@ def quant(args):
             ambig_partners = frozenset.union(*ambig_gene_partners[gene])-frozenset((gene,))
         else:
             ambig_partners = []
+
         data_row = [gene, str(umi_counts[gene]), str(ambig_umi_counts[gene]), ' '.join(ambig_partners)]
+
+        if gene == 'LINC00476':
+            print_to_log(data_row)
+
+
         args.counts.write('%s\n' % '\t'.join(data_row))
     args.counts.close()
 
@@ -351,6 +391,7 @@ if __name__=="__main__":
     parser.add_argument('--min_non_polyA', type=int, default=0)
     parser.add_argument('--umifm_oversequencing', type=argparse.FileType('w'), nargs='?')
     parser.add_argument('--metrics', type=argparse.FileType('w'), nargs='?')
+    parser.add_argument('--low_complexity_mask', type=argparse.FileType('r'), nargs='?')
     args = parser.parse_args()
     quant(args)
 
