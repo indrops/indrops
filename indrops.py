@@ -48,6 +48,12 @@ def to_fastq_lines(bc, umi, seq, qual):
     """
     return '@'+bc+':'+umi+'\n'+seq+'\n+\n'+qual+'\n'
 
+def to_fastq(name, seq, qual):
+    """
+    Format string for output in fastq.
+    """
+    return '@'+name+'\n'+seq+'\n+\n'+qual+'\n'
+
 def from_fastq(handle):
     while True:
         name = next(handle).rstrip()[1:] #Read name
@@ -142,21 +148,31 @@ def print_to_log(msg):
     sys.stderr.write(str(msg)+'\n')
 
 def parallelized_using_workers(original_func):
+    """
+    Wrapper to help parallelize functions that independently operate over barcodes.
+    For parallelization, specify a number of barcodes_per_worker, and a specific worker index. 
+    For testing, specify a single barcode to get processed. 
+    """
 
-    def func_wrapper(self, barcodes_per_worker=0, worker_index=0, **kwargs):
-        with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
-                sorted_barcode_names = sorted(pickle.load(f).values())
+    def func_wrapper(self, barcodes_per_worker=0, worker_index=0, target_barcode=None, **kwargs):
 
-        if barcodes_per_worker == 0:
-            barcodes_per_worker = len(sorted_barcode_names)+1
+        if target_barcode is not None:
+            original_func(self, target_barcode)
 
-        for i in range(worker_index*barcodes_per_worker, (worker_index+1)*barcodes_per_worker):
-            if i >= len(sorted_barcode_names):
-                break
-            chosen_barcode = sorted_barcode_names[i]
+        else: 
+            with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
+                    sorted_barcode_names = sorted(pickle.load(f).values())
 
-            # Actually execute the method being wrapped!
-            original_func(self, chosen_barcode)
+            if barcodes_per_worker == 0:
+                barcodes_per_worker = len(sorted_barcode_names)+1
+
+            for i in range(worker_index*barcodes_per_worker, (worker_index+1)*barcodes_per_worker):
+                if i >= len(sorted_barcode_names):
+                    break
+                chosen_barcode = sorted_barcode_names[i]
+
+                # Actually execute the method being wrapped!
+                original_func(self, chosen_barcode)
 
     return func_wrapper
 
@@ -181,6 +197,9 @@ class IndropsAnalysis():
 
         if 'java' not in self.user_paths:
             self.user_paths['java'] = 'java'
+
+        if 'python' not in self.user_paths:
+            self.user_paths['python'] = 'python'
 
         self.output_paths = {
             'read_fail_counts': 'stats/filtering_metrics.yaml',
@@ -519,6 +538,7 @@ class IndropsAnalysis():
             print_to_log("Does not exists.")
             return 
 
+        intermediate_trimmed_fastq = os.path.join(self.output_paths['split_trimmed_fastq_dir'], '%s.tmp.fastq' % barcode)
         trimmed_fastq = os.path.join(self.output_paths['split_trimmed_fastq_dir'], '%s.fastq' % barcode)
 
         counts_output = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
@@ -529,11 +549,45 @@ class IndropsAnalysis():
         aligned_bam_output = os.path.join(self.output_paths['split_quant_dir'], '%s.aligned.bam' % barcode)
 
         # Build Trimmomatic Trim command
-        trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, trimmed_fastq]
+        trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, intermediate_trimmed_fastq]
         for arg, val in self.parameters['trimmomatic_arguments'].items():
             trimmomatic_cmd.append('%s:%s' % (arg, val))
 
+        # -----
+        # Call Trimmotatic
         subprocess.call(trimmomatic_cmd)
+        # ----- 
+
+
+        # After trimmomatic, limit the maximal polyA length. 
+        total_reads = 0
+        with open(intermediate_trimmed_fastq, 'r') as intermediate_fastq_file:
+            with open(trimmed_fastq, 'w') as final_fastq_file:
+                for name, seq, qual in from_fastq(intermediate_fastq_file):
+                    total_reads += 1
+
+                    low_complexity_bases = sum([m.end()-m.start() for m in re.finditer('A{5,}|T{5,}|C{5,}|G{5,}', seq)])
+                    low_complexity_fraction = float(low_complexity_bases)/len(seq)
+                    if low_complexity_fraction > 0.45:
+                        continue
+                        # pass
+
+
+                    #Identify length of polyA tail.
+                    polyA_length = 0
+                    for s in seq[::-1]:
+                        if s!='A':
+                            break
+                        polyA_length += 1
+
+                    read_length = len(seq)
+                    trim_at_position = read_length - polyA_length + 4
+
+                    if trim_at_position > 20:
+                        new_seq = seq[:trim_at_position]
+                        new_qual = qual[:trim_at_position]
+                        final_fastq_file.write(to_fastq(name, new_seq, new_qual))
+        os.remove(intermediate_trimmed_fastq)
 
         # Build Alignment and Quantification command
         bowtie_exec = os.path.join(self.user_paths['bowtie'], 'bowtie')
@@ -552,7 +606,7 @@ class IndropsAnalysis():
 
         script_dir = os.path.dirname(os.path.realpath(__file__))
 
-        quant_cmd = ['python', os.path.join(script_dir, 'filter_alignments.py'),
+        quant_cmd = [self.user_paths['python'], os.path.join(script_dir, 'filter_alignments.py'),
             '-m', str(self.parameters['umi_quantification_arguments']['m']),
             '-u', str(self.parameters['umi_quantification_arguments']['u']),
             '-d', str(self.parameters['umi_quantification_arguments']['d']),
@@ -565,7 +619,8 @@ class IndropsAnalysis():
             quant_cmd += ['--umifm_oversequencing', oversequencing_metrics_output]
         if self.parameters['output_arguments']['output_umifm_calculation_metrics']:
             quant_cmd += ['--metrics', output_umifm_calculation_metrics]
-
+        if self.parameters['output_arguments']['low_complexity_mask']:
+            quant_cmd += ['--low_complexity_mask', self.parameters['output_arguments']['low_complexity_mask']]
 
         final_pipe = aligned_bam_output if self.parameters['output_arguments']['output_alignment_to_bam'] else '/dev/null'
         final_cmd = ' '.join(bowtie_cmd) + ' | ' + ' '.join(quant_cmd) + ' > ' + final_pipe
@@ -587,14 +642,25 @@ class IndropsAnalysis():
         i = 0
         missing_barcodes = []
         for barcode in sorted_barcode_names:
+            # Check that the file we expect is actually there
+            counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
+            if not os.path.isfile(counts_filename):
+                missing_barcodes.append(barcode)
+                continue
+
+        print_to_log('Missing the following barcodes: '+ ','.join(missing_barcodes))
+        print_to_log('Corresponding indices: ')
+        print_to_log(' '.join([str(int(bc[2:])-1) for bc in missing_barcodes]))
+
+        missing_barcodes = set(missing_barcodes)
+        i = 0
+        for barcode in sorted_barcode_names:
             i += 1
             if (i % 100)== 0:
                 print_to_log('Read %d barcodes.' % i)
             counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
 
-            # Check that the file we expect is actually there
-            if not os.path.isfile(counts_filename):
-                missing_barcodes.append(barcode)
+            if barcode in missing_barcodes:
                 continue
 
             with open(counts_filename, 'r') as f:
@@ -621,9 +687,7 @@ class IndropsAnalysis():
                         ambig_counts_data[gene][barcode] = ambig_counts
                     ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
 
-        print_to_log('Missed the following barcodes: '+ ','.join(missing_barcodes))
-        print_to_log('Corresponding indices: ')
-        print_to_log(' '.join([str(int(bc[2:])-1) for bc in missing_barcodes]))
+
 
 
         print_to_log('Finished processing')
