@@ -402,7 +402,7 @@ class IndropsAnalysis():
             
         bc1 = str(name[:w1_pos])
         bc2 = str(name[bc2_pos:umi_pos])
-        umi = str(name[umi_pos:umi_pos+7])
+        umi = str(name[umi_pos:umi_pos+6])
         
         #Validate barcode (and try to correct when there is no ambiguity)
         if valid_bc1s and valid_bc2s:
