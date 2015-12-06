@@ -620,7 +620,8 @@ class IndropsAnalysis():
         if self.parameters['output_arguments']['output_umifm_calculation_metrics']:
             quant_cmd += ['--metrics', output_umifm_calculation_metrics]
         if self.parameters['output_arguments']['low_complexity_mask']:
-            quant_cmd += ['--low_complexity_mask', self.parameters['output_arguments']['low_complexity_mask']]
+            low_complexity_mask_pickle_path = self.user_paths['bowtie_index_prefix'] + '.low_complexity_regions.pickle'
+            quant_cmd += ['--low_complexity_mask', low_complexity_mask_pickle_path]
 
         final_pipe = aligned_bam_output if self.parameters['output_arguments']['output_alignment_to_bam'] else '/dev/null'
         final_cmd = ' '.join(bowtie_cmd) + ' | ' + ' '.join(quant_cmd) + ' > ' + final_pipe
@@ -650,7 +651,7 @@ class IndropsAnalysis():
 
         print_to_log('Missing the following barcodes: '+ ','.join(missing_barcodes))
         print_to_log('Corresponding indices: ')
-        print_to_log(' '.join([str(int(bc[2:])-1) for bc in missing_barcodes]))
+        print_to_log(','.join([str(int(bc[2:])-1) for bc in missing_barcodes]))
 
         missing_barcodes = set(missing_barcodes)
         i = 0
