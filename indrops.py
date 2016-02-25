@@ -191,6 +191,8 @@ class IndropsAnalysis():
         self.user_paths = parameters['project_paths']
         self.user_paths.update(parameters['general_paths'])
 
+
+
         # Add defaults for any newly added parameters.
         if 'min_non_polyA' not in self.parameters['umi_quantification_arguments']:
             self.parameters['umi_quantification_arguments']['min_non_polyA'] = 0
@@ -202,10 +204,8 @@ class IndropsAnalysis():
             self.user_paths['python'] = 'python'
 
         self.output_paths = {
-            'read_fail_counts': 'stats/filtering_metrics.yaml',
-            'barcode_histogram': 'stats/barcode_abundance_histogram.png',
-            'filtered_fastq': 'pre_split/filtered.fastq', #Fastq file after removal of bad reads, but before split
-            'barcode_read_counts': 'pre_split/barcode_read_counts.pickle',
+            'stats_dir' : 'stats/',
+            'pre_split_dir' : 'pre_split/',
             'good_barcodes_with_names': 'pre_split/good_barcodes_with_names.pickle',
             'split_dir': 'post_split/',
             'split_fastq_dir': 'post_split/filtered_fastq/', #Directory where individual barcode fastqs will be placed
@@ -213,7 +213,6 @@ class IndropsAnalysis():
             'split_quant_dir': 'post_split/quant_output/', #Directory where quantification output will be placed
             'aggregated_counts': 'aggregated_counts/',
         }
-
         # Update all these paths relative to the user-specified output dir.
         for k, rel_path in self.output_paths.items():
             abs_path = os.path.join(self.user_paths['output_dir'], rel_path)
@@ -222,7 +221,44 @@ class IndropsAnalysis():
             #Check, or create relevant output dirs
             check_dir(os.path.dirname(abs_path))
 
-    def filter_and_count_reads(self):
+
+        # For the raw input, check if we have a single or multiple files
+        # Update the output requirements accordingly
+        if self.user_paths['raw_R1_fastq'] and self.user_paths['raw_R2_fastq']:
+
+            self.output_paths['raw_file_pairs'] = [(self.user_paths['raw_R1_fastq'], self.user_paths['raw_R2_fastq'])]
+            self.output_paths['filtered_fastq'] = [os.path.join(self.output_paths['pre_split_dir'], 'filtered.fastq')]
+            self.output_paths['barcode_read_counts'] = [os.path.join(self.output_paths['pre_split_dir'], 'barcode_read_counts.pickle')]
+            self.output_paths['read_fail_counts'] = [os.path.join(self.output_paths['stats_dir'], 'filtering_metrics.png')]
+            self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
+
+        elif self.user_paths['split_raw_R1_prefix'] and self.user_paths['split_raw_R2_prefix'] and self.user_paths['split_suffixes']:
+            suffixes = self.user_paths['split_suffixes']
+            r1s = [self.user_paths['split_raw_R1_prefix']%suf for suf in suffixes]
+            r2s = [self.user_paths['split_raw_R2_prefix']%suf for suf in suffixes]
+            self.output_paths['raw_file_pairs'] = zip(r1s, r2s)
+
+            self.output_paths['filtered_fastq'] = [os.path.join(self.output_paths['pre_split_dir'], 'filtered_%s.fastq' % suf) for suf in suffixes]
+            self.output_paths['barcode_read_counts'] = [os.path.join(self.output_paths['pre_split_dir'], 'barcode_read_counts_%s.pickle' % suf) for suf in suffixes]
+            self.output_paths['read_fail_counts'] = [os.path.join(self.output_paths['stats_dir'], 'filtering_metrics_%s.png' % suf) for suf in suffixes]
+
+            self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
+        else:
+            self.output_paths['raw_file_pairs'] = []
+
+
+    def filter_and_count_reads_wrapper(self, split_file_index=0):
+
+        r1_filename, r2_filename = self.output_paths['raw_file_pairs'][split_file_index]
+        filtered_filename = self.output_paths['filtered_fastq'][split_file_index]
+        barcode_counts_filename = self.output_paths['barcode_read_counts'][split_file_index]
+        failure_counts_filename = self.output_paths['read_fail_counts'][split_file_index]
+        self.filter_and_count_reads(r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename)
+
+        if len(self.output_paths['raw_file_pairs']) == 1:
+            self.make_barcode_abundance_histogram()
+
+    def filter_and_count_reads(self, r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename):
         """
         Input the two raw FastQ files
         Output: 
@@ -241,8 +277,8 @@ class IndropsAnalysis():
         i = 0
         start_time = time.time()
         
-        with open(self.output_paths['filtered_fastq'], 'w') as output_fastq:
-            for r1_seq, r1_qual, r2_seq, r2_qual in self._weave_fastqs(self.user_paths['raw_R1_fastq'], self.user_paths['raw_R2_fastq']):
+        with open(filtered_filename, 'w') as output_fastq:
+            for r1_seq, r1_qual, r2_seq, r2_qual in self._weave_fastqs(r1_filename, r2_filename):
                     
                 # We currently ignore R1 qualities
                 keep, result = self._process_reads(r1_seq, r2_seq, valid_bc1s=bc1s, valid_bc2s=bc2s)
@@ -262,7 +298,7 @@ class IndropsAnalysis():
                     filter_fail_counter[result] += 1
 
         #Save results
-        with open(self.output_paths['barcode_read_counts'], 'w') as f:
+        with open(barcode_counts_filename, 'w') as f:
             pickle.dump(dict(barcode_read_counter), f)
 
 
@@ -273,7 +309,7 @@ class IndropsAnalysis():
             'Valid Fraction' : float(kept_reads)/i,
             'Rejection Flags' : dict(filter_fail_counter)
         }
-        with open(self.output_paths['read_fail_counts'], 'w') as f:
+        with open(failure_counts_filename, 'w') as f:
             yaml.dump(dict(filtering_statistics), f, default_flow_style=False)
 
         print_to_log('%d reads parsed, kept %d reads.' % (i, kept_reads))
@@ -416,8 +452,19 @@ class IndropsAnalysis():
                 bc2 = valid_bc2s[bc2]
             else:
                 return False, 'BC2'
+            if 'N' in umi:
+                return False, 'UMI_error'
         bc = '%s-%s'%(bc1, bc2)
         return True, (bc, umi)
+
+    def get_barcode_read_counts_from_pickle(self):
+        barcode_read_counter = defaultdict(int)
+        for filename in self.output_paths['barcode_read_counts']:
+            with open(filename, 'r') as f:
+                partial_counts = pickle.load(f)
+                for bc, c in partial_counts.items():
+                    barcode_read_counter[bc] += c
+        return barcode_read_counter
 
 
     def make_barcode_abundance_histogram(self):
@@ -425,8 +472,7 @@ class IndropsAnalysis():
         Takes the read-count-by-barcode pickle and outputs a histogram used 
         to determine a treshold on the minimal number of reads coming from good barcodes
         """
-        with open(self.output_paths['barcode_read_counts'], 'r') as f:
-            barcode_read_counter = pickle.load(f)
+        barcode_read_counter = self.get_barcode_read_counts_from_pickle()
 
         count_freq = defaultdict(int)
         for bc, count in barcode_read_counter.items():
@@ -455,8 +501,7 @@ class IndropsAnalysis():
         Takes the read-count-by-barcode pickle and a minimal threshold value, 
         Outputs a list of barcodes to the retained and assigns a 'bcN' name to each barcode
         """
-        with open(self.output_paths['barcode_read_counts'], 'r') as f:
-            barcode_read_counter = pickle.load(f)
+        barcode_read_counter = self.get_barcode_read_counts_from_pickle()
 
         good_barcodes = []
         for bc, count in barcode_read_counter.items():
@@ -496,32 +541,34 @@ class IndropsAnalysis():
         pre_write = defaultdict(list)
         unassigned_filename = os.path.join(self.output_paths['split_fastq_dir'], 'unassigned.fastq')
 
-        with open(self.output_paths['filtered_fastq'], 'r') as input_fastq:
-            for name, seq, qual in from_fastq(input_fastq):
-                pre_write_buffer_size += 1
-                total_processed_reads += 1
-                bc, umi = name.split(':')
-                
-                if bc in barcode_names:
-                    bc_name = barcode_names[bc]
-                    filename = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % bc_name)
-                    pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
+        for filtered_fn in self.output_paths['filtered_fastq']:
+            print_to_log('Now on file %s' % filtered_fn)
+            with open(filtered_fn, 'r') as input_fastq:
+                for name, seq, qual in from_fastq(input_fastq):
+                    pre_write_buffer_size += 1
+                    total_processed_reads += 1
+                    bc, umi = name.split(':')
+                    
+                    if bc in barcode_names:
+                        bc_name = barcode_names[bc]
+                        filename = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % bc_name)
+                        pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
 
-                elif output_unassigned_reads:
-                    pre_write[unassigned_filename].append(to_fastq_lines(bc, umi, seq, qual))
+                    elif output_unassigned_reads:
+                        pre_write[unassigned_filename].append(to_fastq_lines(bc, umi, seq, qual))
 
 
-                if pre_write_buffer_size % 1000000 == 0:
-                    for fn, chunks in pre_write.items():
-                        with open(fn, 'a') as out:
-                            for chunk in chunks:
-                                out.write(chunk)
-                    pre_write_buffer_size = 0
-                    pre_write = defaultdict(list)
+                    if pre_write_buffer_size % 1000000 == 0:
+                        for fn, chunks in pre_write.items():
+                            with open(fn, 'a') as out:
+                                for chunk in chunks:
+                                    out.write(chunk)
+                        pre_write_buffer_size = 0
+                        pre_write = defaultdict(list)
 
-                if total_processed_reads % 1000000 == 0:
-                    sec_per_mil = (time.time()-start_time)/(float(total_processed_reads)/10**6)
-                    print_to_log('%d reads processed, %.02f seconds per M reads.' % (total_processed_reads, sec_per_mil))
+                    if total_processed_reads % 1000000 == 0:
+                        sec_per_mil = (time.time()-start_time)/(float(total_processed_reads)/10**6)
+                        print_to_log('%d reads processed, %.02f seconds per M reads.' % (total_processed_reads, sec_per_mil))
 
         #Make sure we write anything possibly left in 'pre_write'
         for fn, chunks in pre_write.items():
@@ -629,7 +676,7 @@ class IndropsAnalysis():
         subprocess.call(final_cmd, shell=True)
 
 
-    def aggregate_counts(self):
+    def aggregate_counts(self, process_ambiguity_data=False):
         with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
             sorted_barcode_names = sorted(pickle.load(f).values())
 
@@ -678,15 +725,19 @@ class IndropsAnalysis():
                     row = line.rstrip('\n').split('\t')
                     gene = row[0]
                     counts = float(row[1])
-                    ambig_counts = float(row[2])
-                    partners = set(row[3].split())
+                    
+                    
 
                     full_gene_list.add(gene)
                     if counts > 0:
                         counts_data[gene][barcode] = counts
-                    if ambig_counts > 0:
-                        ambig_counts_data[gene][barcode] = ambig_counts
-                    ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
+
+                    if process_ambiguity_data:
+                        ambig_counts = float(row[2])
+                        partners = set(row[3].split())
+                        if ambig_counts > 0:
+                            ambig_counts_data[gene][barcode] = ambig_counts
+                        ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
 
 
 
@@ -706,14 +757,15 @@ class IndropsAnalysis():
         print_to_log('Starting output')
         for gene in sorted(full_gene_list):
             per_sample_counts = [counts_data[gene][s] for s in sorted_barcode_names]
-            per_sample_ambig_counts = [ambig_counts_data[gene][s] for s in sorted_barcode_names]
+            if process_ambiguity_data:
+                per_sample_ambig_counts = [ambig_counts_data[gene][s] for s in sorted_barcode_names]
+                ambig_counts_row = [gene] + [sum(per_sample_counts), sum(per_sample_ambig_counts), ' '.join(ambiguity_partners[gene])] + per_sample_ambig_counts
+                ambig_file.write(to_output_line(ambig_counts_row))
+            else:
+                per_sample_ambig_counts = []
 
             counts_row = [gene] + [sum(per_sample_counts), sum(per_sample_ambig_counts), ' '.join(ambiguity_partners[gene])] + per_sample_counts
-            ambig_counts_row = [gene] + [sum(per_sample_counts), sum(per_sample_ambig_counts), ' '.join(ambiguity_partners[gene])] + per_sample_ambig_counts
-
             output_file.write(to_output_line(counts_row))
-            ambig_file.write(to_output_line(ambig_counts_row))
-
         print_to_log('Aggregation completed in %s' % output_filename)
 
     @parallelized_using_workers
@@ -861,7 +913,11 @@ if __name__=="__main__":
 
     parser_preprocess = subparsers.add_parser('preprocess')
     parser_preprocess.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
-    
+    parser_preprocess.add_argument('--split-file-index', type=int, help='Split file to preprocess, leave as 0 if there is a single file.', default=0)
+
+    parser_histogram = subparsers.add_parser('histogram')
+    parser_histogram.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
+
     parser_split = subparsers.add_parser('split_barcodes')
     parser_split.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
     parser_split.add_argument('--read-count-threshold', type=int,
@@ -894,7 +950,8 @@ if __name__=="__main__":
         parameters = yaml.load(args.parameters)
         analysis = IndropsAnalysis(parameters)
         if args.command == 'preprocess':
-            analysis.filter_and_count_reads()
+            analysis.filter_and_count_reads_wrapper(args.split_file_index)
+        if args.command == 'histogram':
             analysis.make_barcode_abundance_histogram()
         elif args.command == 'split_barcodes':
             analysis.choose_good_barcodes(args.read_count_threshold)

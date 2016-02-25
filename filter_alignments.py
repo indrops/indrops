@@ -33,7 +33,11 @@ def quant(args):
     # Load cache of low complexity regions
     low_complexity_mask = None
     if args.low_complexity_mask:
-        low_complexity_mask = pickle.load(args.low_complexity_mask)
+        low_complexity_regions = pickle.load(args.low_complexity_mask)
+        low_complexity_mask = defaultdict(set)
+        for tx, regions in low_complexity_regions.items():
+            if regions:
+                low_complexity_mask[tx] = set.union(*[set(range(a,b)) for a,b in regions])
 
     def process_read_alignments(alignments):
         """input: one-element list of a single alignment from a bam file 
@@ -58,14 +62,14 @@ def quant(args):
 
         # Remove any alignments that are mostly to low complexity regions
         if low_complexity_mask:
-            good_complexity_alignments = []
-            aligned_to_low_complexity_region = False
             for a in alignments:
                 tx_id = sam_input.getrname(a.tid)
                 low_complexity_bases = low_complexity_mask[tx_id].intersection(set(range(a.pos, a.aend)))
-                if float(len(low_complexity_bases))/(a.aend - a.pos) < 0.5:
-                    good_complexity_alignments.append(a)
-            alignments = good_complexity_alignments
+                low_complexity_fraction = float(len(low_complexity_bases))/(a.aend - a.pos)
+                a.setTag('XC', '%.2f' % low_complexity_fraction)
+
+            low_complexity_thr = 0.5
+            alignments = [a for a in alignments if float(a.opt('XC')) < low_complexity_thr]
 
         # We need to obtain Transcript IDs in terms of reference names (Transcrupt_ID|Gene_ID)
         # as opposed to the arbitrary 'a.tid' number
@@ -351,10 +355,6 @@ def quant(args):
             ambig_partners = []
 
         data_row = [gene, str(umi_counts[gene]), str(ambig_umi_counts[gene]), ' '.join(ambig_partners)]
-
-        if gene == 'LINC00476':
-            print_to_log(data_row)
-
 
         args.counts.write('%s\n' % '\t'.join(data_row))
     args.counts.close()
