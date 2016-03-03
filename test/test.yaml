@@ -1,0 +1,41 @@
+project_prefix: "test"
+project_paths:
+    raw_R1_fastq : "test/test.R1.fastq.gz"
+    raw_R2_fastq : "test/test.R2.fastq.gz"
+    bowtie_index_prefix: "ref/GRCh38.81.index"
+    output_dir : "test/out/"
+        # The output will contain the following directories
+        # 'pre_split': for storage of the processed, but unsplit fastq file
+        # 'stats': for storage of various alignment metrics
+        # 'post_split': for storage of per-barcode data
+
+general_paths:
+    # Reference Files needed for analysis
+    gel_barcode1_list : "ref/barcode_lists/gel_barcode1_list.txt"
+    gel_barcode2_list : "ref/barcode_lists/gel_barcode2_list.txt"
+    # Software Paths
+    bowtie : "" #Directory containing bowtie executable. Leave blank if already on path.
+    trimmomatic: "test/trimmomatic-0.33.jar" #Path to trimmomatic Jar. (ie. /n/sw/centos6/Trimmomatic-0.32/trimmomatic-0.32.jar)
+
+bowtie_arguments:
+    m : 200
+    n : 1
+    l : 15
+    e : 1000
+
+trimmomatic_arguments:
+    LEADING: "28"
+    SLIDINGWINDOW: "4:20"
+    MINLEN: "16"
+
+umi_quantification_arguments:
+    m : 10 #Ignore reads with more than M alignments, after filtering on distance from transcript end.
+    u : 2 #Ignore counts from UMI that should be split among more than U genes.
+    d : 400 #Maximal distance from transcript end, NOT INCLUDING THE POLYA TAIL
+    split-ambigs: False #If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)
+
+output_arguments:
+    output_alignment_to_bam: False
+    output_unaligned_reads_to_other_fastq: False
+    output_oversequencing_metrics: False
+    output_umifm_calculation_metrics: False
