@@ -1,0 +1,5 @@
+test/out
+yamls
+shell_traces
+bins
+*.pyc
