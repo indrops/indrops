@@ -13,6 +13,7 @@ except:
 
 import numpy as np
 import re
+import shutil
 
 # product: product(A, B) returns the same as ((x,y) for x in A for y in B).
 # combination: Return r length subsequences of elements from the input iterable.
@@ -20,6 +21,8 @@ from itertools import product, combinations
 import time
 import matplotlib
 import yaml
+
+import tempfile
 
 # -----------------------
 #
@@ -164,7 +167,7 @@ def parallelized_using_workers(original_func):
 
         else: 
             with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
-                    sorted_barcode_names = sorted(pickle.load(f).values())
+                sorted_barcode_names = sorted(pickle.load(f).values())
 
             if barcodes_per_worker == 0:
                 barcodes_per_worker = len(sorted_barcode_names)+1
@@ -178,6 +181,29 @@ def parallelized_using_workers(original_func):
                 original_func(self, chosen_barcode)
 
     return func_wrapper
+
+
+class FIFO():
+    """
+    A context manager for a named pipe.
+    """
+    def __init__(self, filename=""):
+        if filename:
+            self.filename = filename
+        else:
+            self.tmpdir = tempfile.mkdtemp()
+            self.filename = os.path.join(self.tmpdir, 'fifo')
+
+    def __enter__(self):
+        if os.path.exists(self.filename):
+            os.unlink(self.filename)
+        self.file = os.mkfifo(self.filename)
+        print_to_log(self.filename)
+
+    def __exit__(self, type, value, traceback):
+        os.remove(self.filename)
+        if hasattr(self, 'tmpdir'):
+            os.rmdir(self.tmpdir)
 
 
 # -----------------------
@@ -229,7 +255,7 @@ class IndropsAnalysis():
 
             self.output_paths['raw_file_pairs'] = [(self.user_paths['raw_R1_fastq'], self.user_paths['raw_R2_fastq'])]
             self.output_paths['filtered_fastq'] = [os.path.join(self.output_paths['pre_split_dir'], 'filtered.fastq')]
-            self.output_paths['barcode_read_counts'] = [os.path.join(self.output_paths['pre_split_dir'], 'barcode_read_counts.pickle')]
+            self.output_paths['barcode_read_counts'] = [p + '.counts.pickle' for p in self.output_paths['filtered_fastq']]
             self.output_paths['read_fail_counts'] = [os.path.join(self.output_paths['stats_dir'], 'filtering_metrics.png')]
             self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
 
@@ -240,12 +266,16 @@ class IndropsAnalysis():
             self.output_paths['raw_file_pairs'] = zip(r1s, r2s)
 
             self.output_paths['filtered_fastq'] = [os.path.join(self.output_paths['pre_split_dir'], 'filtered_%s.fastq' % suf) for suf in suffixes]
-            self.output_paths['barcode_read_counts'] = [os.path.join(self.output_paths['pre_split_dir'], 'barcode_read_counts_%s.pickle' % suf) for suf in suffixes]
             self.output_paths['read_fail_counts'] = [os.path.join(self.output_paths['stats_dir'], 'filtering_metrics_%s.png' % suf) for suf in suffixes]
 
             self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
         else:
             self.output_paths['raw_file_pairs'] = []
+
+        self.output_paths['barcode_read_counts'] = [p + '.counts.pickle' for p in self.output_paths['filtered_fastq']]
+        self.output_paths['barcode_read_indices'] = [p + '.index.pickle' for p in self.output_paths['filtered_fastq']]
+        self.output_paths['barcode_sorted_reads'] = os.path.join(self.output_paths['split_dir'], 'barcoded_sorted.fastq')
+        self.output_paths['barcode_sorted_reads_index'] = self.output_paths['barcode_sorted_reads'] + '.index.pickle'
 
 
     def filter_and_count_reads_wrapper(self, split_file_index=0):
@@ -254,10 +284,13 @@ class IndropsAnalysis():
         filtered_filename = self.output_paths['filtered_fastq'][split_file_index]
         barcode_counts_filename = self.output_paths['barcode_read_counts'][split_file_index]
         failure_counts_filename = self.output_paths['read_fail_counts'][split_file_index]
+        
+        # Weave FastQs, keeping only reads that have correct R1 structure. 
         self.filter_and_count_reads(r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename)
 
         if len(self.output_paths['raw_file_pairs']) == 1:
             self.make_barcode_abundance_histogram()
+
 
     def filter_and_count_reads(self, r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename):
         """
@@ -267,7 +300,6 @@ class IndropsAnalysis():
             - A pickle of number of reads originating from each barcode 
         """
         #Prepare data collection
-        barcode_read_counter = defaultdict(int)
         filter_fail_counter = defaultdict(int)
         kept_reads = 0
 
@@ -278,7 +310,36 @@ class IndropsAnalysis():
         i = 0
         start_time = time.time()
         
-        with open(filtered_filename, 'w') as output_fastq:
+        with FIFO() as fifo1, FIFO() as fifo2:
+
+            """
+            We start 3 processes that are connected with Unix pipes.
+
+            Process 1 - Trimmomatic. Doesn't support stdin/stdout, so we instead use named pipes (FIFOs). It reads from FIFO1, and writes to FIFO2. 
+            Process 2 - In line complexity filter, a python script. It reads from FIFO2 (Trimmomatic output) and writes to stdout. 
+            Process 3 - Indexer and counter, a python script. Reads from stdin (piped from Process 2) and writes to 3 files. 
+            """
+
+            trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
+            for arg, val in self.parameters['trimmomatic_arguments'].items():
+                trimmomatic_cmd.append('%s:%s' % (arg, val))
+            p1 = subprocess.Popen(trimmomatic_cmd)
+
+
+            script_dir = os.path.dirname(os.path.realpath(__file__))
+
+            low_complexity_filter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'filter_low_complexity_reads.py'),
+                '-input', fifo2.filename,
+                ]
+            p2 = subprocess.Popen(low_complexity_filter_cmd, stdout=subprocess.PIPE)
+
+
+            indexer_cmd = [self.user_paths['python'], os.path.join(script_dir, 'index_and_count.py'),
+                '-output', filtered_filename]
+            p3 = subprocess.Popen(indexer_cmd, stdin=p2.stdout)
+
+            
+            output_fastq = open(fifo1.filename, 'w')
             for r_name, r1_seq, r1_qual, r2_seq, r2_qual in self._weave_fastqs(r1_filename, r2_filename):
                     
                 # We currently ignore R1 qualities
@@ -293,15 +354,14 @@ class IndropsAnalysis():
                 if keep:
                     bc, umi = result
                     kept_reads += 1
-                    barcode_read_counter[bc] += 1
                     output_fastq.write(to_fastq_lines(bc, umi, r2_seq, r2_qual, r_name))
                 else:
                     filter_fail_counter[result] += 1
+            output_fastq.close()
 
-        #Save results
-        with open(barcode_counts_filename, 'w') as f:
-            pickle.dump(dict(barcode_read_counter), f)
-
+            # Wait for the indexer/counter to finish before moving on. 
+            # The next step will likely require the barcode counts to be outputed.
+            p3.wait()
 
         filtering_statistics = {
             'Total Reads' : i,
@@ -548,15 +608,15 @@ class IndropsAnalysis():
                 for name, seq, qual in from_fastq(input_fastq):
                     pre_write_buffer_size += 1
                     total_processed_reads += 1
-                    bc, umi = name.split(':')
+                    bc = name.split(':')[0]
                     
                     if bc in barcode_names:
                         bc_name = barcode_names[bc]
                         filename = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % bc_name)
-                        pre_write[filename].append(to_fastq_lines(bc, umi, seq, qual))
+                        pre_write[filename].append(to_fastq(name, seq, qual))
 
                     elif output_unassigned_reads:
-                        pre_write[unassigned_filename].append(to_fastq_lines(bc, umi, seq, qual))
+                        pre_write[unassigned_filename].append(to_fastq(name, seq, qual))
 
 
                     if pre_write_buffer_size % 1000000 == 0:
@@ -577,6 +637,38 @@ class IndropsAnalysis():
                 for chunk in chunks:
                     out.write(chunk)
 
+        # Merge individual files, keeping an index.
+        barcode_read_counter = self.get_barcode_read_counts_from_pickle()
+
+        sorted_output_index = {}
+        sorted_output = open(self.output_paths['barcode_sorted_reads'], 'w')
+        for bc, bc_name in sorted(barcode_names.items(), key=lambda i: i[1]):
+            filename = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % bc_name)
+
+            sorted_output_index[bc_name] = (bc, sorted_output.tell(), 4 * barcode_read_counter[bc])
+            print_to_log(str((bc, sorted_output.tell(), 4 * barcode_read_counter[bc])))
+            with open(filename, 'r') as single_barcode:
+                shutil.copyfileobj(single_barcode, sorted_output)
+
+        with open(os.path.join(self.output_paths['split_fastq_dir'], 'unassigned.fastq')) as f:
+            shutil.copyfileobj(f, sorted_output)
+
+        sorted_output.close()
+        with open(self.output_paths['barcode_sorted_reads_index'], 'w') as f:
+            pickle.dump(sorted_output_index, f)
+
+    def get_reads_for_barcode(self, barcode):
+        if not hasattr(self, '_barcode_sorted_reads_index'):
+            with open(self.output_paths['barcode_sorted_reads_index'], 'r') as f:
+                self._barcode_sorted_reads_index = pickle.load(f)
+
+        original_barcode, byte_offset, total_lines = self._barcode_sorted_reads_index[barcode]
+        with open(self.output_paths['barcode_sorted_reads'], 'r') as barcode_sorted_reads:
+            barcode_sorted_reads.seek(byte_offset)
+            for i in range(total_lines):
+                yield next(barcode_sorted_reads)
+
+
     @parallelized_using_workers
     def quantify_expression_for_barcode(self, barcode):
 
@@ -596,64 +688,25 @@ class IndropsAnalysis():
         unaligned_reads_output = os.path.join(self.output_paths['split_quant_dir'], '%s.unaligned.fastq' % barcode)
         aligned_bam_output = os.path.join(self.output_paths['split_quant_dir'], '%s.aligned.bam' % barcode)
 
-        # Build Trimmomatic Trim command
-        trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fastq_input, intermediate_trimmed_fastq]
-        for arg, val in self.parameters['trimmomatic_arguments'].items():
-            trimmomatic_cmd.append('%s:%s' % (arg, val))
 
-        # -----
-        # Call Trimmotatic
-        subprocess.call(trimmomatic_cmd)
-        # ----- 
+        # Bowtie command
 
-
-        # After trimmomatic, limit the maximal polyA length. 
-        total_reads = 0
-        with open(intermediate_trimmed_fastq, 'r') as intermediate_fastq_file:
-            with open(trimmed_fastq, 'w') as final_fastq_file:
-                for name, seq, qual in from_fastq(intermediate_fastq_file):
-                    total_reads += 1
-
-                    low_complexity_bases = sum([m.end()-m.start() for m in re.finditer('A{5,}|T{5,}|C{5,}|G{5,}', seq)])
-                    low_complexity_fraction = float(low_complexity_bases)/len(seq)
-                    if low_complexity_fraction > 0.45:
-                        continue
-                        # pass
-
-
-                    #Identify length of polyA tail.
-                    polyA_length = 0
-                    for s in seq[::-1]:
-                        if s!='A':
-                            break
-                        polyA_length += 1
-
-                    read_length = len(seq)
-                    trim_at_position = read_length - polyA_length + 4
-
-                    if trim_at_position > 20:
-                        new_seq = seq[:trim_at_position]
-                        new_qual = qual[:trim_at_position]
-                        final_fastq_file.write(to_fastq(name, new_seq, new_qual))
-        os.remove(intermediate_trimmed_fastq)
-
-        # Build Alignment and Quantification command
         bowtie_exec = os.path.join(self.user_paths['bowtie'], 'bowtie')
-
-        bowtie_cmd = [bowtie_exec, self.user_paths['bowtie_index_prefix'], '-q', trimmed_fastq,
+        bowtie_cmd = [bowtie_exec, self.user_paths['bowtie_index_prefix'], '-q', '-',
             '-p', '1', '-a', '--best', '--strata', '--chunkmbs', '1000', '--norc', '--sam',
+            '-shmem', #should sometimes reduce memory usage...?
             '-m', str(self.parameters['bowtie_arguments']['m']),
             '-n', str(self.parameters['bowtie_arguments']['n']),
             '-l', str(self.parameters['bowtie_arguments']['l']),
             '-e', str(self.parameters['bowtie_arguments']['e']),
             ]
-
         if self.parameters['output_arguments']['output_unaligned_reads_to_other_fastq']:
             bowtie_cmd += ['--un', unaligned_reads_output]
 
+        
+        # Quantification command
 
         script_dir = os.path.dirname(os.path.realpath(__file__))
-
         quant_cmd = [self.user_paths['python'], os.path.join(script_dir, 'filter_alignments.py'),
             '-m', str(self.parameters['umi_quantification_arguments']['m']),
             '-u', str(self.parameters['umi_quantification_arguments']['u']),
@@ -671,10 +724,20 @@ class IndropsAnalysis():
             low_complexity_mask_pickle_path = self.user_paths['bowtie_index_prefix'] + '.low_complexity_regions.pickle'
             quant_cmd += ['--low_complexity_mask', low_complexity_mask_pickle_path]
 
-        final_pipe = aligned_bam_output if self.parameters['output_arguments']['output_alignment_to_bam'] else '/dev/null'
-        final_cmd = ' '.join(bowtie_cmd) + ' | ' + ' '.join(quant_cmd) + ' > ' + final_pipe
+        if self.parameters['output_arguments']['output_alignment_to_bam']:
+            p2_output = open(aligned_bam_output, 'w')
+        else:
+            p2_output = open(os.devnull, 'w')
 
-        subprocess.call(final_cmd, shell=True)
+
+        # Spawn processes
+        p1 = subprocess.Popen(bowtie_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        p2 = subprocess.Popen(quant_cmd, stdin=p1.stdout, stdout=p2_output)
+
+        for line in self.get_reads_for_barcode(barcode):
+            p1.stdin.write(line)
+        p1.stdin.close()
+        p2.wait() #Wait to finish before moving on
 
 
     def aggregate_counts(self, process_ambiguity_data=False):
@@ -740,9 +803,6 @@ class IndropsAnalysis():
                             ambig_counts_data[gene][barcode] = ambig_counts
                         ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
 
-
-
-
         print_to_log('Finished processing')
         output_filename = os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt')
         output_file = open(output_filename, 'w')
@@ -789,6 +849,7 @@ class IndropsAnalysis():
             subprocess.call(index_cmd)
         else:
             print_to_log('File not found: ' + aligned_bam)
+
 def build_transcriptome_from_ENSEMBL_files(input_fasta_filename, bowtie_index_prefix,
     gtf_filename="", 
     polyA_tail_length=50,
@@ -937,6 +998,10 @@ if __name__=="__main__":
     parser_sort_bam.add_argument('--barcodes-per-worker', type=int, help='Barcodes to be processed by each worker.', default=0)
     parser_sort_bam.add_argument('--worker-index', type=int, help='Index of current worker. (Starting at 0). Make sure max(worker-index)*(barcodes-per-worker) > total barcodes.', default=0)
 
+    parser_get_reads = subparsers.add_parser('get_reads')
+    parser_get_reads.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
+    parser_get_reads.add_argument('barcode', type=str, help='Barcode ID. (i.e. bc0020)')
+    parser_get_reads.add_argument('output', type=argparse.FileType('w'), nargs='?', default=sys.stdout)
 
     args = parser.parse_args()
 
@@ -963,4 +1028,7 @@ if __name__=="__main__":
             analysis.aggregate_counts()
         elif args.command == 'sort_bam':
             analysis.sort_and_index_bam(args.barcodes_per_worker, args.worker_index)
-        
+        elif args.command == 'get_reads':
+            for line in analysis.get_reads_for_barcode(args.barcode):
+                args.output.write(line)
+

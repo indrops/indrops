@@ -2,7 +2,7 @@ project_prefix: "test"
 project_paths:
     raw_R1_fastq : "test/test.R1.fastq.gz"
     raw_R2_fastq : "test/test.R2.fastq.gz"
-    bowtie_index_prefix: "ref/GRCh38.81.index"
+    bowtie_index_prefix: "/Users/averes/Projects/Melton/grch38/Homo_sapiens.GRCh38.82.annotated"
     output_dir : "test/out/"
         # The output will contain the following directories
         # 'pre_split': for storage of the processed, but unsplit fastq file
@@ -15,7 +15,8 @@ general_paths:
     gel_barcode2_list : "ref/barcode_lists/gel_barcode2_list.txt"
     # Software Paths
     bowtie : "" #Directory containing bowtie executable. Leave blank if already on path.
-    trimmomatic: "test/trimmomatic-0.33.jar" #Path to trimmomatic Jar. (ie. /n/sw/centos6/Trimmomatic-0.32/trimmomatic-0.32.jar)
+    trimmomatic: "/Users/averes/Projects/Melton/Dropseq/bins/trimmomatic-0.33.jar" #Path to trimmomatic Jar. (ie. /n/sw/centos6/Trimmomatic-0.32/trimmomatic-0.32.jar)
+    python : "/Users/averes/miniconda3/envs/py27/bin/python"
 
 bowtie_arguments:
     m : 200
@@ -33,9 +34,11 @@ umi_quantification_arguments:
     u : 2 #Ignore counts from UMI that should be split among more than U genes.
     d : 400 #Maximal distance from transcript end, NOT INCLUDING THE POLYA TAIL
     split-ambigs: False #If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)
+    min_non_polyA: 15 #Require reads to align to this much non-polyA sequence. (Set to 0 to disable filtering on this parameter.)
 
 output_arguments:
     output_alignment_to_bam: False
     output_unaligned_reads_to_other_fastq: False
     output_oversequencing_metrics: False
     output_umifm_calculation_metrics: False
+    low_complexity_mask: False
