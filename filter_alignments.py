@@ -160,10 +160,18 @@ def quant(args):
                 chosen_alignments, processing_stats = process_read_alignments(read_alignments)
                 if chosen_alignments:
                     split_name = current_read.split(':')
-                    if len(split_name) == 3:
+                    # print_to_log(split_name)
+
+                    if len(split_name) == 2:
+                        umi = split_name[1] #Old Adrian Format
+                    elif len(split_name) == 3:
                         umi = split_name[1] #Adrian format
                     else:
+                        # print_to_log('======')
+                        # print_to_log(split_name)
+                        # print_to_log('WTF')
                         umi = split_name[4] #Old Allon format
+                        # continue
                     seq = read_alignments[0].seq
                     reads_by_umi[umi][alignment.qname] = chosen_alignments
 
@@ -184,7 +192,9 @@ def quant(args):
         chosen_alignments, processing_stats = process_read_alignments(read_alignments)
         if chosen_alignments:
             split_name = current_read.split(':')
-            if len(split_name) == 3:
+            if len(split_name) == 2:
+                umi = split_name[1] #Old Adrian Format
+            elif len(split_name) == 3:
                 umi = split_name[1] #Adrian format
             else:
                 umi = split_name[4] #Allon format
@@ -387,7 +397,7 @@ if __name__=="__main__":
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
     parser.add_argument('-u', help='Ignore counts from UMI that should be split among more than U genes.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
-    parser.add_argument('--polyA', help='Length of polyA tail in reference transcriptome.', type=int, default=125)
+    parser.add_argument('--polyA', help='Length of polyA tail in reference transcriptome.', type=int, default=5)
     parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
     parser.add_argument('--mixed_ref', help="Reference is mixed, with records named 'gene:ref', should only keep reads that align to one ref.", action='store_true', default=False)
     parser.add_argument('--counts', type=argparse.FileType('w'))
