@@ -348,7 +348,7 @@ class IndropsAnalysis():
 
         while True:
             #Read 4 lines from each FastQ
-            name = next(r1_stream) #Read name
+            name = next(r1_stream).rstrip()[1:].split()[0] #Read name
             r1_seq = next(r1_stream).rstrip() #Read seq
             next(r1_stream) #+ line
             r1_qual = next(r1_stream).rstrip() #Read qual
@@ -402,9 +402,9 @@ class IndropsAnalysis():
         # Check for polyT signal at 3' end.
         # 44 is the length of BC1+W1+BC2+UMI, given the longest PolyT
         #BC1: 8-11 bases
-		#W1 : 22 bases
-		#BC2: 8 bases
-		#UMI: 6 bases
+        #W1 : 22 bases
+        #BC2: 8 bases
+        #UMI: 6 bases
 
         # check for empty reads (due to adapter trimming)
         if not read:
@@ -416,7 +416,7 @@ class IndropsAnalysis():
             w1_pos = name.find(w1)
 #             Nstart=0
 #             if name.startswith('N')
-#             	Nstart=1
+#               Nstart=1
             if not 7 < w1_pos < 12:
                 # print_to_log(name)
                 return False, 'No_W1'
@@ -429,13 +429,13 @@ class IndropsAnalysis():
             else:
                 return False, 'No_W1'
                 
-    	bc2_pos=w1_pos+22
-    	umi_pos=bc2_pos+8
-    	polyTpos=umi_pos+6
-    	#was:expected_poly_t = name[44:44+minimal_polyT_len_on_R1:]
-    	expected_poly_t = name[polyTpos:polyTpos+minimal_polyT_len_on_R1]
-    	if string_hamming_distance(expected_poly_t, 'T'*minimal_polyT_len_on_R1) > 3:
-    	         return False, 'No_polyT'
+        bc2_pos=w1_pos+22
+        umi_pos=bc2_pos+8
+        polyTpos=umi_pos+6
+        #was:expected_poly_t = name[44:44+minimal_polyT_len_on_R1:]
+        expected_poly_t = name[polyTpos:polyTpos+minimal_polyT_len_on_R1]
+        if string_hamming_distance(expected_poly_t, 'T'*minimal_polyT_len_on_R1) > 3:
+                 return False, 'No_polyT'
             
         bc1 = str(name[:w1_pos])
         bc2 = str(name[bc2_pos:umi_pos])
