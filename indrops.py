@@ -42,17 +42,20 @@ def rev_comp(seq):
     tbl = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
     return ''.join(tbl[s] for s in seq[::-1])
 
-def to_fastq_lines(bc, umi, seq, qual):
-    """
-    Return string that can be written to fastQ file
-    """
-    return '@'+bc+':'+umi+'\n'+seq+'\n+\n'+qual+'\n'
 
 def to_fastq(name, seq, qual):
     """
-    Format string for output in fastq.
+    Return string that can be written to fastQ file
     """
     return '@'+name+'\n'+seq+'\n+\n'+qual+'\n'
+
+def to_fastq_lines(bc, umi, seq, qual, read_name=''):
+    """
+    Return string that can be written to fastQ file
+    """
+    reformated_name = read_name.replace(':', '_')
+    name = '%s:%s:%s' % (bc, umi, reformated_name)
+    return to_fastq(name, seq, qual)
 
 def from_fastq(handle):
     while True:
@@ -191,8 +194,6 @@ class IndropsAnalysis():
         self.user_paths = parameters['project_paths']
         self.user_paths.update(parameters['general_paths'])
 
-
-
         # Add defaults for any newly added parameters.
         if 'min_non_polyA' not in self.parameters['umi_quantification_arguments']:
             self.parameters['umi_quantification_arguments']['min_non_polyA'] = 0
@@ -278,7 +279,7 @@ class IndropsAnalysis():
         start_time = time.time()
         
         with open(filtered_filename, 'w') as output_fastq:
-            for r1_seq, r1_qual, r2_seq, r2_qual in self._weave_fastqs(r1_filename, r2_filename):
+            for r_name, r1_seq, r1_qual, r2_seq, r2_qual in self._weave_fastqs(r1_filename, r2_filename):
                     
                 # We currently ignore R1 qualities
                 keep, result = self._process_reads(r1_seq, r2_seq, valid_bc1s=bc1s, valid_bc2s=bc2s)
@@ -293,7 +294,7 @@ class IndropsAnalysis():
                     bc, umi = result
                     kept_reads += 1
                     barcode_read_counter[bc] += 1
-                    output_fastq.write(to_fastq_lines(bc, umi, r2_seq, r2_qual))
+                    output_fastq.write(to_fastq_lines(bc, umi, r2_seq, r2_qual, r_name))
                 else:
                     filter_fail_counter[result] += 1
 
@@ -359,7 +360,7 @@ class IndropsAnalysis():
             
             # changed to allow for empty reads (caused by adapter trimming)
             if name:
-                yield r1_seq, r1_qual, r2_seq, r2_qual
+                yield name, r1_seq, r1_qual, r2_seq, r2_qual
             else:
             # if not r1_seq or not r2_seq:
                 break

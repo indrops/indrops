@@ -1,6 +1,10 @@
 import pysam
 from collections import defaultdict
-import cPickle as pickle
+try:
+   import cPickle as pickle
+except:
+   import pickle
+
 from copy import copy
 from itertools import combinations
 
@@ -156,12 +160,12 @@ def quant(args):
                 chosen_alignments, processing_stats = process_read_alignments(read_alignments)
                 if chosen_alignments:
                     split_name = current_read.split(':')
-                    if len(split_name) == 2:
+                    if len(split_name) == 3:
                         umi = split_name[1] #Adrian format
                     else:
                         umi = split_name[4] #Old Allon format
                     seq = read_alignments[0].seq
-                    reads_by_umi[umi][seq] = chosen_alignments
+                    reads_by_umi[umi][alignment.qname] = chosen_alignments
 
                 uniq_count += processing_stats[0]
                 non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
@@ -180,12 +184,12 @@ def quant(args):
         chosen_alignments, processing_stats = process_read_alignments(read_alignments)
         if chosen_alignments:
             split_name = current_read.split(':')
-            if len(split_name) == 2:
+            if len(split_name) == 3:
                 umi = split_name[1] #Adrian format
             else:
                 umi = split_name[4] #Allon format
             seq = read_alignments[0].seq
-            reads_by_umi[umi][seq] = chosen_alignments
+            reads_by_umi[umi][alignment.qname] = chosen_alignments
 
         uniq_count += processing_stats[0]
         non_uniq_count += not(processing_stats[0] or processing_stats[1] or processing_stats[2])
@@ -321,7 +325,6 @@ def quant(args):
                 # XK - Start of the alignment, relative to the transcriptome
                 # XL - End of the alignment, relative to the transcriptome
                 # XT - Length of alignment transcript
-
 
                 alignment_for_output.setTag('XU', umi)
                 alignment_for_output.setTag('XO', len(supporting_alignments))
