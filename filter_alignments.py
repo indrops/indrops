@@ -387,7 +387,7 @@ if __name__=="__main__":
     parser.add_argument('-m', help='Ignore reads with more than M alignments, after filtering on distance from transcript end.', type=int, default=4)
     parser.add_argument('-u', help='Ignore counts from UMI that should be split among more than U genes.', type=int, default=4)
     parser.add_argument('-d', help='Maximal distance from transcript end.', type=int, default=525)
-    parser.add_argument('--polyA', help='Length of polyA tail in reference transcriptome.', type=int, default=125)
+    parser.add_argument('--polyA', help='Length of polyA tail in reference transcriptome.', type=int, default=5)
     parser.add_argument('--split_ambi', help="If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)", action='store_true', default=False)
     parser.add_argument('--mixed_ref', help="Reference is mixed, with records named 'gene:ref', should only keep reads that align to one ref.", action='store_true', default=False)
     parser.add_argument('--counts', type=argparse.FileType('w'))
