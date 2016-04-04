@@ -634,7 +634,7 @@ class IndropsAnalysis():
                     if trim_at_position > 20:
                         new_seq = seq[:trim_at_position]
                         new_qual = qual[:trim_at_position]
-                        final_fastq_file.write(to_fastq(name, new_seq, new_qual))
+                        final_fastq_file.write(to_fastq(name + ':%d' % total_reads, new_seq, new_qual))
         os.remove(intermediate_trimmed_fastq)
 
         # Build Alignment and Quantification command
