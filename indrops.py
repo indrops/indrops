@@ -157,7 +157,7 @@ def parallelized_using_workers(original_func):
     For testing, specify a single barcode to get processed. 
     """
 
-    def func_wrapper(self, barcodes_per_worker=0, worker_index=0, target_barcode=None, **kwargs):
+    def func_wrapper(self, barcodes_per_worker=0, worker_index=0, target_barcode=None, total_workers=0, missing='', **kwargs):
 
         if target_barcode is not None:
             original_func(self, target_barcode)
@@ -166,14 +166,28 @@ def parallelized_using_workers(original_func):
             with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
                     sorted_barcode_names = sorted(pickle.load(f).values())
 
-            if barcodes_per_worker == 0:
-                barcodes_per_worker = len(sorted_barcode_names)+1
+            if missing:
+                # Chose barcodes to run based on a missing pattern. 
+                barcodes_for_this_worker = []
+                for bc in sorted_barcode_names:
+                    check_file = self.user_paths['output_dir'] + missing % bc
+                    if not os.path.isfile(check_file):
+                        barcodes_for_this_worker.append(bc)
+                print_to_log('Round-up of missing barcodes:')
+                print_to_log(barcodes_for_this_worker)
 
-            for i in range(worker_index*barcodes_per_worker, (worker_index+1)*barcodes_per_worker):
-                if i >= len(sorted_barcode_names):
-                    break
-                chosen_barcode = sorted_barcode_names[i]
+            elif total_workers > 0: #Total workers over-rides barcodes per worker.
+                barcodes_for_this_worker = []
+                i = worker_index
+                while i < len(sorted_barcode_names):
+                    barcodes_for_this_worker.append(sorted_barcode_names[i])
+                    i += total_workers
+            elif barcodes_per_worker == 0 and total_workers == 0:
+                barcodes_for_this_worker = sorted_barcode_names
+            else:
+                barcodes_for_this_worker = [sorted_barcode_names[i] for i in range(worker_index*barcodes_per_worker, (worker_index+1)*barcodes_per_worker)]
 
+            for chosen_barcode in barcodes_for_this_worker:
                 # Actually execute the method being wrapped!
                 original_func(self, chosen_barcode)
 
@@ -928,6 +942,8 @@ if __name__=="__main__":
     parser_quantify.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
     parser_quantify.add_argument('--barcodes-per-worker', type=int, help='Barcodes to be processed by each worker.', default=0)
     parser_quantify.add_argument('--worker-index', type=int, help='Index of current worker. (Starting at 0). Make sure max(worker-index)*(barcodes-per-worker) > total barcodes.', default=0)
+    parser_quantify.add_argument('--total-workers', type=int, help='Total workers that are working together. This takes precedence over barcodes-per-worker.', default=0)
+    parser_quantify.add_argument('--missing', type=str, help='Pattern for file name to search', default='')
 
     parser_aggregate = subparsers.add_parser('aggregate')
     parser_aggregate.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
@@ -958,9 +974,9 @@ if __name__=="__main__":
             analysis.choose_good_barcodes(args.read_count_threshold)
             analysis.split_reads_by_barcode()
         elif args.command == 'quantify':
-            analysis.quantify_expression_for_barcode(args.barcodes_per_worker, args.worker_index)
+            analysis.quantify_expression_for_barcode(args.barcodes_per_worker, args.worker_index, total_workers=args.total_workers, missing=args.missing)
         elif args.command == 'aggregate':
             analysis.aggregate_counts()
         elif args.command == 'sort_bam':
-            analysis.sort_and_index_bam(args.barcodes_per_worker, args.worker_index)
+            analysis.sort_and_index_bam(args.barcodes_per_worker, args.worker_index, total_workers=args.total_workers)
         
