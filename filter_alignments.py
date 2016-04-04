@@ -160,10 +160,18 @@ def quant(args):
                 chosen_alignments, processing_stats = process_read_alignments(read_alignments)
                 if chosen_alignments:
                     split_name = current_read.split(':')
-                    if len(split_name) == 3:
+                    # print_to_log(split_name)
+
+                    if len(split_name) == 2:
+                        umi = split_name[1] #Old Adrian Format
+                    elif len(split_name) == 3:
                         umi = split_name[1] #Adrian format
                     else:
+                        # print_to_log('======')
+                        # print_to_log(split_name)
+                        # print_to_log('WTF')
                         umi = split_name[4] #Old Allon format
+                        # continue
                     seq = read_alignments[0].seq
                     reads_by_umi[umi][alignment.qname] = chosen_alignments
 
@@ -184,7 +192,9 @@ def quant(args):
         chosen_alignments, processing_stats = process_read_alignments(read_alignments)
         if chosen_alignments:
             split_name = current_read.split(':')
-            if len(split_name) == 3:
+            if len(split_name) == 2:
+                umi = split_name[1] #Old Adrian Format
+            elif len(split_name) == 3:
                 umi = split_name[1] #Adrian format
             else:
                 umi = split_name[4] #Allon format
