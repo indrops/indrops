@@ -199,6 +199,7 @@ class FIFO():
             os.unlink(self.filename)
         self.file = os.mkfifo(self.filename)
         print_to_log(self.filename)
+        return self
 
     def __exit__(self, type, value, traceback):
         os.remove(self.filename)
@@ -316,8 +317,9 @@ class IndropsAnalysis():
             We start 3 processes that are connected with Unix pipes.
 
             Process 1 - Trimmomatic. Doesn't support stdin/stdout, so we instead use named pipes (FIFOs). It reads from FIFO1, and writes to FIFO2. 
-            Process 2 - In line complexity filter, a python script. It reads from FIFO2 (Trimmomatic output) and writes to stdout. 
-            Process 3 - Indexer and counter, a python script. Reads from stdin (piped from Process 2) and writes to 3 files. 
+            Process 2 - In line complexity filter, a python script. It reads from FIFO2 (Trimmomatic output) and writes to the ouput file. 
+
+            When these are done, we start another process to count the results on the FastQ file.
             """
 
             trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
@@ -330,13 +332,9 @@ class IndropsAnalysis():
 
             low_complexity_filter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'filter_low_complexity_reads.py'),
                 '-input', fifo2.filename,
+                '-output', filtered_filename,
                 ]
-            p2 = subprocess.Popen(low_complexity_filter_cmd, stdout=subprocess.PIPE)
-
-
-            indexer_cmd = [self.user_paths['python'], os.path.join(script_dir, 'index_and_count.py'),
-                '-output', filtered_filename]
-            p3 = subprocess.Popen(indexer_cmd, stdin=p2.stdout)
+            p2 = subprocess.Popen(low_complexity_filter_cmd)
 
             
             output_fastq = open(fifo1.filename, 'w')
@@ -361,7 +359,14 @@ class IndropsAnalysis():
 
             # Wait for the indexer/counter to finish before moving on. 
             # The next step will likely require the barcode counts to be outputed.
+            p2.wait()
+
+
+            counter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'count_barcode_distribution.py'), filtered_filename]
+            p3 = subprocess.Popen(counter_cmd)
             p3.wait()
+
+
 
         filtering_statistics = {
             'Total Reads' : i,
