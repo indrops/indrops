@@ -663,10 +663,12 @@ class IndropsAnalysis():
             # print_to_log(str((bc, sorted_output.tell(), 4 * barcode_read_counter[bc])))
             with open(filename, 'r') as single_barcode:
                 shutil.copyfileobj(single_barcode, sorted_output)
+            os.remove(filename)
 
         if output_unassigned_reads:
-            with open(os.path.join(self.output_paths['split_fastq_dir'], 'unassigned.fastq')) as f:
+            with open(unassigned_filename) as f:
                 shutil.copyfileobj(f, sorted_output)
+            os.remove(unassigned_filename)
 
         sorted_output.close()
         with open(self.output_paths['barcode_sorted_reads_index'], 'w') as f:
