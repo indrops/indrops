@@ -182,10 +182,15 @@ def parallelized_using_workers(original_func):
             if missing:
                 # Chose barcodes to run based on a missing pattern. 
                 barcodes_for_this_worker = []
+
+                dirname = os.path.dirname(self.user_paths['output_dir'] + missing)
+                basename = os.path.basename(self.user_paths['output_dir'] + missing)
+                existing_files = set(os.listdir(dirname))
+
                 for bc in sorted_barcode_names:
-                    check_file = self.user_paths['output_dir'] + missing % bc
-                    if not os.path.isfile(check_file):
+                    if basename % bc not in existing_files:
                         barcodes_for_this_worker.append(bc)
+
                 print_to_log('Round-up of missing barcodes:')
                 print_to_log(barcodes_for_this_worker)
 
