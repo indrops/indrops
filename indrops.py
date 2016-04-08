@@ -279,7 +279,6 @@ class IndropsAnalysis():
 
             self.output_paths['raw_file_pairs'] = [(self.user_paths['raw_R1_fastq'], self.user_paths['raw_R2_fastq'])]
             self.output_paths['filtered_fastq'] = [os.path.join(self.output_paths['pre_split_dir'], 'filtered.fastq')]
-            self.output_paths['barcode_read_counts'] = [p + '.counts.pickle' for p in self.output_paths['filtered_fastq']]
             self.output_paths['read_fail_counts'] = [os.path.join(self.output_paths['stats_dir'], 'filtering_metrics.png')]
             self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
 
@@ -703,22 +702,12 @@ class IndropsAnalysis():
     @parallelized_using_workers
     def quantify_expression_for_barcode(self, barcode):
 
-        fastq_input = os.path.join(self.output_paths['split_fastq_dir'], '%s.fastq' % barcode)
-        if not os.path.isfile(fastq_input):
-            print_to_log(fastq_input)
-            print_to_log("Does not exists.")
-            return 
-
-        intermediate_trimmed_fastq = os.path.join(self.output_paths['split_trimmed_fastq_dir'], '%s.tmp.fastq' % barcode)
-        trimmed_fastq = os.path.join(self.output_paths['split_trimmed_fastq_dir'], '%s.fastq' % barcode)
-
         counts_output = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
         quant_metrics_output = os.path.join(self.output_paths['split_quant_dir'], '%s.quant_metrics' % barcode)
         oversequencing_metrics_output = os.path.join(self.output_paths['split_quant_dir'], '%s.oversequencing' % barcode)
         output_umifm_calculation_metrics = os.path.join(self.output_paths['split_quant_dir'], '%s.umifm_stats' % barcode)
         unaligned_reads_output = os.path.join(self.output_paths['split_quant_dir'], '%s.unaligned.fastq' % barcode)
         aligned_bam_output = os.path.join(self.output_paths['split_quant_dir'], '%s.aligned.bam' % barcode)
-
 
         # Bowtie command
 
