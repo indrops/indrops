@@ -765,23 +765,15 @@ class IndropsAnalysis():
         p2.wait() #Wait to finish before moving on
 
 
-    def aggregate_counts(self, process_ambiguity_data=False):
+    def aggregate_counts(self, process_ambiguity_data=False, minimal_counts=0):
         with open(self.output_paths['good_barcodes_with_names'], 'r') as f:
             sorted_barcode_names = sorted(pickle.load(f).values())
 
-        counts_data = defaultdict(lambda : defaultdict(float))
-        ambig_counts_data = defaultdict(lambda : defaultdict(float))
-        ambiguity_partners = defaultdict(set)
 
-        full_gene_list = set()
-
-        print_to_log('Started aggregating barcodes.')
-        i = 0
+        existing_barcodes = os.listdir(self.output_paths['split_quant_dir'])
         missing_barcodes = []
         for barcode in sorted_barcode_names:
-            # Check that the file we expect is actually there
-            counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
-            if not os.path.isfile(counts_filename):
+            if not ('%s.counts' % barcode) in existing_barcodes:
                 missing_barcodes.append(barcode)
                 continue
 
@@ -791,67 +783,67 @@ class IndropsAnalysis():
 
         missing_barcodes = set(missing_barcodes)
         i = 0
-        for barcode in sorted_barcode_names:
-            i += 1
-            if (i % 100)== 0:
-                print_to_log('Read %d barcodes.' % i)
-            counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
 
+        output_filename = os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt')
+        output_file = open(output_filename, 'w')
+
+        i = 0
+        gene_names = []
+
+        all_counts = None
+        for i, barcode in enumerate(sorted_barcode_names):
+            if (i % 100)== 0:
+                print_to_log('Read %d barcodes (of %d).' % (i, len(sorted_barcode_names)))
             if barcode in missing_barcodes:
                 continue
 
+            counts_filename = os.path.join(self.output_paths['split_quant_dir'], '%s.counts' % barcode)
             with open(counts_filename, 'r') as f:
-                
-                # If we have an empty file, reading the header will raise 'StopIteration'
-                # so we can catch it here
                 try:
-                    header = next(f).rstrip('\n').split('\t')
+                    header = next(f)
                 except StopIteration:
                     print_to_log(str(int(barcode[2:])-1))
                     continue
 
-                for line in f:
-                    row = line.rstrip('\n').split('\t')
-                    gene = row[0]
-                    counts = float(row[1])
-                    
-                    
+                if i == 0:
+                    first_file_counts = []
+                    for line in f:
+                        row = line.rstrip('\n').split('\t')
+                        first_file_counts.append(float(row[1]))
+                        gene_names.append(row[0])
 
-                    full_gene_list.add(gene)
-                    if counts > 0:
-                        counts_data[gene][barcode] = counts
+                    all_counts = np.zeros((len(gene_names), len(sorted_barcode_names)))
+                    all_counts[:, 0] = np.array(first_file_counts)
+                    is_first_file = False
 
-                    if process_ambiguity_data:
-                        ambig_counts = float(row[2])
-                        partners = set(row[3].split())
-                        if ambig_counts > 0:
-                            ambig_counts_data[gene][barcode] = ambig_counts
-                        ambiguity_partners[gene] = ambiguity_partners[gene].union(partners)
+                else:
+                    positive_counts_mask = []
+                    file_counts = []
+                    for j, line in enumerate(f):
+                        row = line.rstrip('\n').split('\t')
+                        count = float(row[1])
+                        if count > 0:
+                            file_counts.append(count)
+                            positive_counts_mask.append(j)
+                    all_counts[positive_counts_mask, i] = np.array(file_counts)
 
-        print_to_log('Finished processing')
-        output_filename = os.path.join(self.output_paths['aggregated_counts'], 'full_counts.txt')
-        output_file = open(output_filename, 'w')
-        ambig_filename = os.path.join(self.output_paths['aggregated_counts'], 'ambig_counts.txt')
-        ambig_file = open(ambig_filename, 'w')
 
-        output_header = ['gene'] + ['Sum_counts', 'Sum_ambig', 'Ambigs'] + sorted_barcode_names
-        to_output_line = lambda row: '%s\n' % '\t'.join([str(r) for r in row])
 
+        barcode_name_array = np.array(sorted_barcode_names)
+        barcodes_above_threshold = all_counts.sum(axis=0) > minimal_counts
+        gene_total_counts = all_counts.sum(axis=1)
+        print_to_log('Output only %d barcodes above threshold.' % sum(barcodes_above_threshold))
+
+
+        to_output_line = lambda row: ('\t'.join([str(r) for r in row]))
+        output_header = ['gene'] + ['Sum_counts', 'Sum_ambig', 'Ambigs'] + list(barcode_name_array[barcodes_above_threshold])
         output_file.write(to_output_line(output_header))
-        ambig_file.write(to_output_line(output_header))
+        for i in range(all_counts.shape[0]):
+            line = [gene_names[i], gene_total_counts[i], '0.0', ''] + list(all_counts[i, barcodes_above_threshold])
+            output_file.write('\n' + to_output_line(line))
+            if (i % 1000)== 0:
+                print_to_log('Wrote %d genes.' % i)
 
-        print_to_log('Starting output')
-        for gene in sorted(full_gene_list):
-            per_sample_counts = [counts_data[gene][s] for s in sorted_barcode_names]
-            if process_ambiguity_data:
-                per_sample_ambig_counts = [ambig_counts_data[gene][s] for s in sorted_barcode_names]
-                ambig_counts_row = [gene] + [sum(per_sample_counts), sum(per_sample_ambig_counts), ' '.join(ambiguity_partners[gene])] + per_sample_ambig_counts
-                ambig_file.write(to_output_line(ambig_counts_row))
-            else:
-                per_sample_ambig_counts = []
-
-            counts_row = [gene] + [sum(per_sample_counts), sum(per_sample_ambig_counts), ' '.join(ambiguity_partners[gene])] + per_sample_counts
-            output_file.write(to_output_line(counts_row))
         print_to_log('Aggregation completed in %s' % output_filename)
 
     @parallelized_using_workers
@@ -1019,6 +1011,7 @@ if __name__=="__main__":
 
     parser_aggregate = subparsers.add_parser('aggregate')
     parser_aggregate.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
+    parser_aggregate.add_argument('--minimal-counts', type=int, help='Minimal counts for barcodes that get written to output.', default=0)
 
     parser_sort_bam = subparsers.add_parser('sort_bam')
     parser_sort_bam.add_argument('parameters', type=argparse.FileType('r'), help='Project Parameters YAML File.')
@@ -1052,7 +1045,7 @@ if __name__=="__main__":
         elif args.command == 'quantify':
             analysis.quantify_expression_for_barcode(args.barcodes_per_worker, args.worker_index, total_workers=args.total_workers, missing=args.missing)
         elif args.command == 'aggregate':
-            analysis.aggregate_counts()
+            analysis.aggregate_counts(minimal_counts=args.minimal_counts)
         elif args.command == 'sort_bam':
             analysis.sort_and_index_bam(args.barcodes_per_worker, args.worker_index)
         elif args.command == 'get_reads':
