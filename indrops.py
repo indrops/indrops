@@ -80,6 +80,22 @@ def from_fastq(handle):
             break
         yield name, seq, qual
 
+def seq_neighborhood(seq, n_subs=1):
+    """
+    Given a sequence, yield all sequences within n_subs substitutions of 
+    that sequence by looping through each combination of base pairs within
+    each combination of positions.
+    """
+    for positions in combinations(range(len(seq)), n_subs):
+    # yields all unique combinations of indices for n_subs mutations
+        for subs in product(*("ATGCN",)*n_subs):
+        # yields all combinations of possible nucleotides for strings of length
+        # n_subs
+            seq_copy = list(seq)
+            for p, s in zip(positions, subs):
+                seq_copy[p] = s
+            yield ''.join(seq_copy)
+
 def build_barcode_neighborhoods(barcode_file):
     """
     Given a set of barcodes, produce sequences which can unambiguously be
@@ -88,22 +104,7 @@ def build_barcode_neighborhoods(barcode_file):
     1change and another with 2changes, keep the 1change mapping.
     """
 
-    def seq_neighborhood(seq, n_subs=1):
-        """
-        Given a sequence, yield all sequences within n_subs substitutions of 
-        that sequence by looping through each combination of base pairs within
-        each combination of positions.
-        """
-        for positions in combinations(range(len(seq)), n_subs):
-        # yields all unique combinations of indices for n_subs mutations
-            for subs in product(*("ATGCN",)*n_subs):
-            # yields all combinations of possible nucleotides for strings of length
-            # n_subs
-                seq_copy = list(seq)
-                for p, s in zip(positions, subs):
-                    seq_copy[p] = s
-                yield ''.join(seq_copy)
-    
+
     # contains all mutants that map uniquely to a barcode
     clean_mapping = dict()
 
