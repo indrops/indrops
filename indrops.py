@@ -24,6 +24,8 @@ import yaml
 
 import tempfile
 
+from contextlib import contextmanager
+
 # -----------------------
 #
 # Default parameters
@@ -212,7 +214,6 @@ def parallelized_using_workers(original_func):
 
     return func_wrapper
 
-
 class FIFO():
     """
     A context manager for a named pipe.
@@ -236,11 +237,22 @@ class FIFO():
             os.rmdir(self.tmpdir)
 
 
+# class Filter()
+
+
+
 # -----------------------
 #
 # Core objects
 #
 # -----------------------
+
+# class v2Demultiplexer():
+
+#     def 
+
+
+
 
 
 class IndropsAnalysis():
@@ -306,49 +318,38 @@ class IndropsAnalysis():
         self.output_paths['barcode_sorted_reads'] = os.path.join(self.output_paths['split_dir'], 'barcoded_sorted.fastq')
         self.output_paths['barcode_sorted_reads_index'] = self.output_paths['barcode_sorted_reads'] + '.index.pickle'
 
+    ########
+    #
+    # V2 Beads design
+    #
+    #######
 
-    def filter_and_count_reads_wrapper(self, split_file_index=0):
+    # def v2_filter_and_count_reads_wrapper(self, split_file_index=0):
 
-        r1_filename, r2_filename = self.output_paths['raw_file_pairs'][split_file_index]
-        filtered_filename = self.output_paths['filtered_fastq'][split_file_index]
-        barcode_counts_filename = self.output_paths['barcode_read_counts'][split_file_index]
-        failure_counts_filename = self.output_paths['read_fail_counts'][split_file_index]
+    #     r1_filename, r2_filename = self.output_paths['raw_file_pairs'][split_file_index]
+    #     filtered_filename = self.output_paths['filtered_fastq'][split_file_index]
+    #     barcode_counts_filename = self.output_paths['barcode_read_counts'][split_file_index]
+    #     failure_counts_filename = self.output_paths['read_fail_counts'][split_file_index]
         
-        # Weave FastQs, keeping only reads that have correct R1 structure. 
-        self.filter_and_count_reads(r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename)
+    #     # Weave FastQs, keeping only reads that have correct R1 structure. 
+    #     self.v1_filter_and_count_reads(r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename)
 
-        if len(self.output_paths['raw_file_pairs']) == 1:
-            self.make_barcode_abundance_histogram()
+    #     if len(self.output_paths['raw_file_pairs']) == 1:
+    #         self.make_barcode_abundance_histogram()
 
 
-    def filter_and_count_reads(self, r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename):
+    @contextmanager
+    def trimmomatic_and_low_complexity_filter_process(self, filtered_filename):
         """
-        Input the two raw FastQ files
-        Output: 
-            - A single fastQ file that uses the read name to store the barcoding information
-            - A pickle of number of reads originating from each barcode 
+        We start 3 processes that are connected with Unix pipes.
+
+        Process 1 - Trimmomatic. Doesn't support stdin/stdout, so we instead use named pipes (FIFOs). It reads from FIFO1, and writes to FIFO2. 
+        Process 2 - In line complexity filter, a python script. It reads from FIFO2 (Trimmomatic output) and writes to the ouput file. 
+
+        When these are done, we start another process to count the results on the FastQ file.
         """
-        #Prepare data collection
-        filter_fail_counter = defaultdict(int)
-        kept_reads = 0
 
-        #Get barcode neighborhoods
-        bc1s = build_barcode_neighborhoods(self.user_paths['gel_barcode1_list'])
-        bc2s = build_barcode_neighborhoods(self.user_paths['gel_barcode2_list'])
-
-        i = 0
-        start_time = time.time()
-        
         with FIFO() as fifo1, FIFO() as fifo2:
-
-            """
-            We start 3 processes that are connected with Unix pipes.
-
-            Process 1 - Trimmomatic. Doesn't support stdin/stdout, so we instead use named pipes (FIFOs). It reads from FIFO1, and writes to FIFO2. 
-            Process 2 - In line complexity filter, a python script. It reads from FIFO2 (Trimmomatic output) and writes to the ouput file. 
-
-            When these are done, we start another process to count the results on the FastQ file.
-            """
 
             trimmomatic_cmd = [self.user_paths['java'], '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
             for arg, val in self.parameters['trimmomatic_arguments'].items():
@@ -366,12 +367,67 @@ class IndropsAnalysis():
 
             
             output_fastq = open(fifo1.filename, 'w')
-            for r_name, r1_seq, r1_qual, r2_seq, r2_qual in self._weave_fastqs(r1_filename, r2_filename):
-                    
-                # We currently ignore R1 qualities
-                keep, result = self._process_reads(r1_seq, r2_seq, valid_bc1s=bc1s, valid_bc2s=bc2s)
+            yield output_fastq
+            output_fastq.close()
 
-                # why not look at quality of r1_seq as well to toss out extra reads here?
+            # Wait for the indexer/counter to finish before moving on. 
+            # The next step will likely require the barcode counts to be outputed.
+            p2.wait()
+
+        counter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'count_barcode_distribution.py'), filtered_filename]
+        p3 = subprocess.Popen(counter_cmd)
+        p3.wait()
+
+
+    ########
+    #
+    # V1 Beads design
+    #
+    #######
+
+    def v1_filter_and_count_reads_wrapper(self, split_file_index=0):
+
+        r1_filename, r2_filename = self.output_paths['raw_file_pairs'][split_file_index]
+        filtered_filename = self.output_paths['filtered_fastq'][split_file_index]
+        barcode_counts_filename = self.output_paths['barcode_read_counts'][split_file_index]
+        failure_counts_filename = self.output_paths['read_fail_counts'][split_file_index]
+        
+        # Weave FastQs, keeping only reads that have correct R1 structure. 
+        self.v1_filter_and_count_reads(r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename)
+
+        if len(self.output_paths['raw_file_pairs']) == 1:
+            self.make_barcode_abundance_histogram()
+
+
+    def v1_filter_and_count_reads(self, r1_filename, r2_filename, filtered_filename, barcode_counts_filename, failure_counts_filename):
+        """
+        Input the two raw FastQ files
+        Output: 
+            - A single fastQ file that uses the read name to store the barcoding information
+            - A pickle of number of reads originating from each barcode 
+        """
+        #Prepare data collection
+        filter_fail_counter = defaultdict(int)
+        kept_reads = 0
+
+        #Get barcode neighborhoods
+        bc1s = build_barcode_neighborhoods(self.user_paths['gel_barcode1_list'])
+        bc2s = build_barcode_neighborhoods(self.user_paths['gel_barcode2_list'])
+
+        i = 0
+        start_time = time.time()
+
+        # This starts a Trimmoatic process, a low complexity filter process, and will 
+        # upon closing, start the barcode distribution counting process.
+        with self.trimmomatic_and_low_complexity_filter_process(filtered_filename) as trim_process:
+
+            #Iterate over the weaved reads
+            for r_name, r1_seq, r1_qual, r2_seq, r2_qual in self._v1_weave_fastqs(r1_filename, r2_filename):
+                    
+                # Check if they should be kept
+                keep, result = self._v1_process_reads(r1_seq, r2_seq, valid_bc1s=bc1s, valid_bc2s=bc2s)
+
+                
                 i += 1
                 if i%1000000 == 0:
                     sec_per_mil = (time.time()-start_time)/(float(i)/10**6)
@@ -380,21 +436,11 @@ class IndropsAnalysis():
                 if keep:
                     bc, umi = result
                     kept_reads += 1
-                    output_fastq.write(to_fastq_lines(bc, umi, r2_seq, r2_qual, r_name))
+
+                    # Write the the reads worth keeping
+                    trim_process.write(to_fastq_lines(bc, umi, r2_seq, r2_qual, r_name))
                 else:
                     filter_fail_counter[result] += 1
-            output_fastq.close()
-
-            # Wait for the indexer/counter to finish before moving on. 
-            # The next step will likely require the barcode counts to be outputed.
-            p2.wait()
-
-
-            counter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'count_barcode_distribution.py'), filtered_filename]
-            p3 = subprocess.Popen(counter_cmd)
-            p3.wait()
-
-
 
         filtering_statistics = {
             'Total Reads' : i,
@@ -408,7 +454,7 @@ class IndropsAnalysis():
 
         print_to_log('%d reads parsed, kept %d reads.' % (i, kept_reads))
 
-    def _weave_fastqs(self, r1_fastq, r2_fastq):
+    def _v1_weave_fastqs(self, r1_fastq, r2_fastq):
         """
         Merge 2 FastQ files by returning paired reads for each.
         Returns only R1_seq, R2_seq and R2_qual.
@@ -461,7 +507,7 @@ class IndropsAnalysis():
         r1_stream.close()
         r2_stream.close()
 
-    def _process_reads(self, name, read, valid_bc1s={}, valid_bc2s={}):
+    def _v1_process_reads(self, name, read, valid_bc1s={}, valid_bc2s={}):
         """
         Returns either:
             True, (barcode, umi)
@@ -550,6 +596,12 @@ class IndropsAnalysis():
                 return False, 'UMI_error'
         bc = '%s-%s'%(bc1, bc2)
         return True, (bc, umi)
+
+    ########
+    #
+    # Design independent analysis
+    #
+    #######
 
     def get_barcode_read_counts_from_pickle(self):
         barcode_read_counter = defaultdict(int)
@@ -1037,7 +1089,7 @@ if __name__=="__main__":
         parameters = yaml.load(args.parameters)
         analysis = IndropsAnalysis(parameters)
         if args.command == 'preprocess':
-            analysis.filter_and_count_reads_wrapper(args.split_file_index)
+            analysis.v1_filter_and_count_reads_wrapper(args.split_file_index)
         if args.command == 'histogram':
             analysis.make_barcode_abundance_histogram()
         elif args.command == 'split_barcodes':
