@@ -360,7 +360,53 @@ class v2Demultiplexer():
         final_bc = '%s-%s' % (bc1, bc2)
         return True, lib_index, (final_bc, umi)
 
-    def v2_filter_and_count_reads(self):
+    def _v2_process_reads_debug(self, name, seqs, quals, valid_bc1s={}, valid_bc2s={}, valid_libs={}):
+        """
+        Returns either:
+            True, (barcode, umi)
+                (if read passes filter)
+            False, name of filter that failed
+                (for stats collection)
+        """
+
+        r1, r2, r3, r4 = seqs
+
+
+        bc1, valid_bc1 = None, True
+        bc2, valid_bc2 = None, True
+        lib, valid_lib = None, True
+        umi, valid_umi = None, True
+
+
+        if r2 in valid_bc1s:
+            bc1 = valid_bc1s[r2]
+        else:
+            bc1 = r2 
+            valid_bc1 = False
+
+
+        if r3 in valid_libs:
+            lib = valid_libs[r3]
+        else:
+            lib = r3
+            valid_lib = False
+
+        
+        bc2 = r4[:8]
+        umi = r4[8:8+6]
+        polyA = r4[8+6:]
+        
+        if bc2 in valid_bc2s:
+            bc2 = valid_bc2s[bc2]
+        else:
+            valid_bc2 = False
+
+        if 'N' in umi:
+            valid_umi = False
+
+        return (valid_bc1, valid_bc2, valid_lib, valid_umi), (bc1, bc2, lib, umi) 
+
+    def NORMAL_v2_filter_and_count_reads(self):
 
         # Prepare error corrected barcode sets
         error_corrected_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], False)
@@ -402,7 +448,6 @@ class v2Demultiplexer():
                 bio_read = seqs[0]
                 bio_qual = quals[0]
                 trim_processes[lib_index].write(to_fastq_lines(bc, umi, bio_read, bio_qual, r_name[1:]))
-                # print_to_log(to_fastq_lines(bc, umi, bio_read, bio_qual, r_name))
                 filtering_statistics[lib_index]['Valid'] += 1
                 overall_filtering_statistics['Valid'] += 1
 
@@ -437,6 +482,135 @@ class v2Demultiplexer():
             filtering_statistics_managers[lib].__exit__(None, None, None)
 
         print_to_log('Closed up shop')
+
+
+    def v2_filter_and_count_reads(self):
+
+        # Prepare error corrected barcode sets
+        error_corrected_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], False)
+        error_corrected_rev_compl_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], True)
+
+
+        # print(error_corrected_rev_compl_barcodes['ACATCTAT'])
+        print(error_corrected_barcodes['AAGAAGGT'])
+
+        overall_filtering_statistics = defaultdict(int)
+
+        # Paths for the 4 expected FastQs
+        input_fastqs = []
+        for r in [1, 2, 3, 4]:
+            input_fastqs.append(self.parameters['fastq_path_base'] % (self.parameters['split_affixes'][self.split_file_index], r))
+
+        last_ping = time.time()
+        ping_every_n_reads = 1000000
+
+        validity_counter = defaultdict(int)
+        
+        bc1_pass_bc2_freq = defaultdict(int)
+        bc1_fail_bc2_freq = defaultdict(int)
+
+        bc1s_seqs = {'pass': [], 'fail' : []}
+
+        target_lib = 'TACTCC'
+        target_bc2 = 'ACATCTAT'
+
+        per_bc2_data = defaultdict(list)
+
+        # for s in ('P', 'F'):
+        #     base_path = "/n/home15/adrianveres/new_indrops/debug/%s_%s_%s_R%d.fastq"
+        #     output_fastqs[s] = [open(base_path % (s, target_lib, target_bc2, r), 'w') for r in [1,2,3,4]]
+
+        i = 0
+        for r_name, seqs, quals in self._weave_fastqs(input_fastqs):
+
+            # Python 3 compatibility in mind!
+            seqs = [s.decode('utf-8') for s in seqs]
+
+            (valid_bc1, valid_bc2, valid_lib, valid_umi), (bc1, bc2, lib, umi) = self._v2_process_reads_debug(r_name, seqs, quals,
+                                                    error_corrected_barcodes, error_corrected_rev_compl_barcodes, 
+                                                    self.sequence_to_index_mapping)
+
+            # validity_counter[(valid_bc1, valid_bc2, valid_lib, valid_umi)] += 1
+
+            if lib != target_lib:
+                continue
+
+            # BC1 is bad, everything else seems good
+
+            # if sum((valid_bc1, valid_bc2, valid_lib, valid_umi))==4:
+            #     bc1_pass_bc2_freq[bc2] += 1
+
+            # if sum((valid_bc1, valid_bc2, valid_lib, valid_umi))==3 and valid_bc1 == False:
+            #     bc1_fail_bc2_freq[bc2] += 1
+            i += 1
+            if i % 100000 == 0:
+                print(i)
+
+            #     # for k, v in sorted(validity_counter.items(), key = lambda i: -i[1]):
+            #     #     print('  ', v, k)
+            #     # print(' ---- ')
+
+            #     pt = float(sum(bc1_pass_bc2_freq.values()))
+            #     ft = float(sum(bc1_fail_bc2_freq.values()))
+
+            #     sorted_pass = sorted(bc1_pass_bc2_freq.items(), key = lambda i: -i[1])
+            #     sorted_fail = sorted(bc1_fail_bc2_freq.items(), key = lambda i: -i[1])
+
+            #     for (pbc, pn), (fbc, fn) in zip(sorted_pass, sorted_fail)[:2]:
+            #         print('  %s  %.02fpct    %s  %.02fpct' % (pbc, 100*pn/pt, fbc, 100*fn/ft))
+            #     print(' ----- ')
+
+            if valid_bc2 and valid_lib and valid_umi:
+                per_bc2_data[bc2].append((r_name, seqs[1], quals[1]))
+
+
+            #     if bc2 == target_bc2:
+
+                    # if valid_bc1 : 
+                    #     for fh, s, q in zip(output_fastqs['P'], seqs, quals):
+                    #         fh.write(to_fastq(r_name, s, q))
+                    # else:
+                    #     for fh, s, q in zip(output_fastqs['F'], seqs, quals):
+                    #         fh.write(to_fastq(r_name, s, q))
+
+
+
+                    # if valid_bc1 : 
+                    #     bc1s_seqs['pass'].append((seqs[1], quals[1]))
+                    #     # print('')
+                    #     # pass
+                    #     # print('P', bc1, quals[1])
+                    # else:
+                    #     bc1s_seqs['fail'].append((seqs[1], quals[1]))
+                        # print('F', bc1, quals[1], seqs[0])
+
+            # if keep:
+            #     bc, umi = result
+            #     bio_read = seqs[0]
+            #     bio_qual = quals[0]
+            #     overall_filtering_statistics['Valid'] += 1
+
+            # else:
+            #     overall_filtering_statistics[result] += 1
+
+            # # Track speed per M reads
+            # overall_filtering_statistics['Total'] += 1
+
+        for bc in per_bc2_data.keys():
+            with open("/n/home15/adrianveres/new_indrops/debug/%s_R2.fastq" % bc, 'w') as f:
+                for n, s, q in per_bc2_data[bc]:
+                    f.write(to_fastq(n,s,q))
+        # with open('/n/home15/adrianveres/new_indrops/debug/bc1_data.pickle', 'w') as f:
+        #     pickle.dump(bc1s_seqs, f)
+
+        # with open('/n/home15/adrianveres/new_indrops/debug/fail_bc2_dist.pickle', 'w') as f:
+        #     pickle.dump({'pass': dict(bc1_pass_bc2_freq), 'fail': dict(bc1_fail_bc2_freq)}, f)
+            
+        # with open('/n/home15/adrianveres/new_indrops/debug/fail_counter.pickle', 'w') as f:
+        #     pickle.dump(dict(validity_counter), f)
+
+        print_to_log('%d reads parsed, kept %d reads.' % (overall_filtering_statistics['Total'], overall_filtering_statistics['Valid']))
+
 
 
 class IndropsAnalysis():
@@ -499,7 +673,7 @@ class IndropsAnalysis():
             self.output_paths['raw_file_pairs'] = []
 
         if self.user_paths['split_suffixes']:
-            self.build_filtered_reads_paths()
+            self.build_filtered_reads_paths(self.user_paths['split_suffixes'])
 
         self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
         self.output_paths['barcode_sorted_reads'] = os.path.join(self.output_paths['split_dir'], 'barcoded_sorted.fastq')
