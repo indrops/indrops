@@ -34,7 +34,7 @@ from contextlib import contextmanager
 
 import subprocess, threading
 
-class Command(object):
+class ThreadedSubprocess(object):
     def __init__(self, cmd):
         self.cmd = cmd
         self.process = None
@@ -56,9 +56,9 @@ class Command(object):
             thread.join()
         print self.process.returncode
 
-command = Command("echo 'Process started'; sleep 2; echo 'Process finished'")
-command.run(timeout=3)
-command.run(timeout=1)
+# command = Command("echo 'Process started'; sleep 2; echo 'Process finished'")
+# command.run(timeout=3)
+# command.run(timeout=1)
 
 
 
@@ -256,7 +256,7 @@ class FIFO():
     def __enter__(self):
         if os.path.exists(self.filename):
             os.unlink(self.filename)
-        self.file = os.mkfifo(self.filename)
+        os.mkfifo(self.filename)
         return self
 
     def __exit__(self, type, value, traceback):
@@ -288,17 +288,16 @@ class v2Demultiplexer():
 
             new_affixes = ['%s_%s_%s' % (self.parameters['run_name'], lib_index, affix) for affix in self.parameters['split_affixes']]
             self.libraries[lib_index].build_filtered_reads_paths(new_affixes)
-            print_to_log('Started lib with index %s' % lib_index)
 
         libs = self.libraries.keys()
         self.sequence_to_index_mapping = dict(zip(libs, libs))
         if self.parameters['error_correct_library_indices']:
             index_neighborhoods = [set(seq_neighborhood(lib, 1)) for lib in libs]
-            for clib, clibs in zip(libs, index_neighborhoods):
+            for lib, clibs in zip(libs, index_neighborhoods):
                 # Quick check that error-correction maps to a single index
-                if sum(clib in hood for hood in index_neighborhoods)==1:
-                    self.sequence_to_index_mapping[clib] = clib
-
+                for clib in clibs:
+                    if sum(clib in hood for hood in index_neighborhoods)==1:
+                        self.sequence_to_index_mapping[clib] = lib
 
     def _weave_fastqs(self, fastqs):
         last_extension = [fn.split('.')[-1] for fn in fastqs]
@@ -339,7 +338,7 @@ class v2Demultiplexer():
         if r3 in valid_libs:
             lib_index = valid_libs[r3]
         else:
-            return False, None, 'No_library_index'
+            return False, r3, 'Invalid_library_index'
 
         if r2 in valid_bc1s:
             bc1 = valid_bc1s[r2]
@@ -366,8 +365,6 @@ class v2Demultiplexer():
         # Prepare error corrected barcode sets
         error_corrected_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], False)
         error_corrected_rev_compl_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], True)
-        
-        print_to_log('BC hoods done')
 
         # Open up our context managers
         trim_processes = {}
@@ -384,15 +381,13 @@ class v2Demultiplexer():
 
         overall_filtering_statistics = defaultdict(int)
 
-        print_to_log('Contexts opened')
-
         # Paths for the 4 expected FastQs
         input_fastqs = []
         for r in [1, 2, 3, 4]:
             input_fastqs.append(self.parameters['fastq_path_base'] % (self.parameters['split_affixes'][self.split_file_index], r))
 
         last_ping = time.time()
-        print_to_log('Party time')
+        ping_every_n_reads = 1000000
 
         for r_name, seqs, quals in self._weave_fastqs(input_fastqs):
 
@@ -402,33 +397,42 @@ class v2Demultiplexer():
             keep, lib_index, result = self._v2_process_reads(r_name, seqs, quals,
                                                     error_corrected_barcodes, error_corrected_rev_compl_barcodes, 
                                                     self.sequence_to_index_mapping)
-
             if keep:
                 bc, umi = result
-                bio_read = seqs[3]
-                bio_qual = quals[3]
-                # trim_processes[lib_index].write(to_fastq_lines(bc, umi, bio_read, bio_qual, r_name))
+                bio_read = seqs[0]
+                bio_qual = quals[0]
+                trim_processes[lib_index].write(to_fastq_lines(bc, umi, bio_read, bio_qual, r_name[1:]))
+                # print_to_log(to_fastq_lines(bc, umi, bio_read, bio_qual, r_name))
                 filtering_statistics[lib_index]['Valid'] += 1
                 overall_filtering_statistics['Valid'] += 1
 
             else:
-                if lib_index is not None:
+                if result != 'Invalid_library_index':
                     filtering_statistics[lib_index][result] += 1
                 overall_filtering_statistics[result] += 1
 
             # Track speed per M reads
             overall_filtering_statistics['Total'] += 1
-            ping_every_n_reads = 100000
+            
             
             if overall_filtering_statistics['Total']%ping_every_n_reads == 0:
                 sec_per_mil = (time.time()-last_ping)/(float(ping_every_n_reads)/10**6)
                 last_ping = time.time()
                 print_to_log('%d reads parsed, kept %d reads, currently %.02f seconds/M reads.' % (overall_filtering_statistics['Total'], overall_filtering_statistics['Valid'], sec_per_mil))
-                print_to_log(overall_filtering_statistics)
+                
+                for k in ['Valid', 'Invalid_library_index', 'Invalid_BC1',  'Invalid_BC2', 'UMI_contains_N']:
+                    print_to_log("     %.02fpct %s" % (100.*overall_filtering_statistics[k]/overall_filtering_statistics['Total'], k))
+                print_to_log("     ----")
+                for lib in self.libraries.keys():
+                    print_to_log("     %.02fpct %s" % (100.*filtering_statistics[lib]['Valid']/overall_filtering_statistics['Valid'], lib))
+
         print_to_log('%d reads parsed, kept %d reads.' % (overall_filtering_statistics['Total'], overall_filtering_statistics['Valid']))
 
         # Close up the context managers
         for lib in self.libraries.keys():
+            print_to_log(lib)
+            print_to_log(filtering_statistics[lib])
+
             trim_processes_managers[lib].__exit__(None, None, None)
             filtering_statistics_managers[lib].__exit__(None, None, None)
 
@@ -480,9 +484,11 @@ class IndropsAnalysis():
             self.output_paths['raw_file_pairs'] = [(self.user_paths['raw_R1_fastq'], self.user_paths['raw_R2_fastq'])]
             self.output_paths['filtered_fastq'] = [os.path.join(self.output_paths['pre_split_dir'], 'filtered.fastq')]
             self.output_paths['read_fail_counts'] = [os.path.join(self.output_paths['stats_dir'], 'filtering_metrics.png')]
+            self.output_paths['barcode_read_counts'] = [p + '.counts.pickle' for p in self.output_paths['filtered_fastq']]
+            self.output_paths['barcode_read_indices'] = [p + '.index.pickle' for p in self.output_paths['filtered_fastq']]
             
 
-        elif self.user_paths['split_raw_R1_prefix'] and self.user_paths['split_raw_R2_prefix'] and self.user_paths['split_suffixes']:
+        if self.user_paths['split_raw_R1_prefix'] and self.user_paths['split_raw_R2_prefix'] and self.user_paths['split_suffixes']:
             suffixes = self.user_paths['split_suffixes']
             r1s = [self.user_paths['split_raw_R1_prefix']%suf for suf in suffixes]
             r2s = [self.user_paths['split_raw_R2_prefix']%suf for suf in suffixes]
@@ -491,6 +497,9 @@ class IndropsAnalysis():
             self.build_filtered_reads_paths(suffixes)
         else:
             self.output_paths['raw_file_pairs'] = []
+
+        if self.user_paths['split_suffixes']:
+            self.build_filtered_reads_paths()
 
         self.output_paths['barcode_histogram'] = os.path.join(self.output_paths['stats_dir'], 'barcode_abundance_histogram.png')
         self.output_paths['barcode_sorted_reads'] = os.path.join(self.output_paths['split_dir'], 'barcoded_sorted.fastq')
@@ -513,29 +522,28 @@ class IndropsAnalysis():
         When these are done, we start another process to count the results on the FastQ file.
         """
         filtered_filename = self.output_paths['filtered_fastq'][self.split_file_index]
-        with FIFO(dir=self.output_paths['pre_split_dir']) as fifo1, FIFO(dir=self.output_paths['pre_split_dir']) as fifo2:
-
-            trimmomatic_cmd = [self.user_paths['java'], '-Xmx500m', '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
-            for arg, val in self.parameters['trimmomatic_arguments'].items():
-                trimmomatic_cmd.append('%s:%s' % (arg, val))
-            p1 = subprocess.Popen(trimmomatic_cmd)
-
-
+        with FIFO(dir=self.output_paths['pre_split_dir']) as fifo2:
             script_dir = os.path.dirname(os.path.realpath(__file__))
-
             low_complexity_filter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'filter_low_complexity_reads.py'),
                 '-input', fifo2.filename,
                 '-output', filtered_filename,
                 ]
             p2 = subprocess.Popen(low_complexity_filter_cmd)
 
-            
-            output_fastq = open(fifo1.filename, 'w')
-            yield output_fastq
-            output_fastq.close()
+            with FIFO(dir=self.output_paths['pre_split_dir']) as fifo1:
 
-            # Wait for the indexer/counter to finish before moving on. 
-            # The next step will likely require the barcode counts to be outputed.
+                trimmomatic_cmd = [self.user_paths['java'], '-Xmx500m', '-jar', self.user_paths['trimmomatic'], 'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
+                for arg, val in self.parameters['trimmomatic_arguments'].items():
+                    trimmomatic_cmd.append('%s:%s' % (arg, val))
+                p1 = subprocess.Popen(trimmomatic_cmd)
+
+            
+                fifo1_filehandle = open(fifo1.filename, 'w')
+                yield fifo1_filehandle
+                fifo1_filehandle.write('\n') # THIS IS AWFUL, but for some reason, otherwise Trimmomatic won't detect that we are at EOF...!!!! This makes it crash.
+                fifo1_filehandle.close()
+                p1.wait()
+
             p2.wait()
 
         counter_cmd = [self.user_paths['python'], os.path.join(script_dir, 'count_barcode_distribution.py'), filtered_filename]
@@ -551,7 +559,6 @@ class IndropsAnalysis():
             'Total Reads' : filtering_statistics_counter['Total'],
             'Valid Reads' : filtering_statistics_counter['Valid'],
             'Rejected Reads' : filtering_statistics_counter['Total'] - filtering_statistics_counter['Valid'],
-            'Valid Fraction' : float(filtering_statistics_counter['Valid'])/filtering_statistics_counter['Total'],
             'Rejection Flags' : dict(filtering_statistics_counter)
         }
 
@@ -1252,8 +1259,8 @@ if __name__=="__main__":
             demultiplexer.v2_filter_and_count_reads()
 
         elif args.command in ['preprocess', 'histogram', 'split_barcodes', 'quantify', 'aggregate', 'sort_bam', 'get_reads']:
-            analysis = IndropsAnalysis(parameters, args.split_file_index)
             parameters = yaml.load(args.parameters)
+            analysis = IndropsAnalysis(parameters, args.split_file_index if hasattr(args, 'split_file_index') else 0)
             if args.command == 'preprocess':
                 analysis.v1_filter_and_count_reads()
                 if len(analysis.output_paths['raw_file_pairs']) == 1:
