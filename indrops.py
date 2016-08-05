@@ -406,7 +406,7 @@ class v2Demultiplexer():
 
         return (valid_bc1, valid_bc2, valid_lib, valid_umi), (bc1, bc2, lib, umi) 
 
-    def NORMAL_v2_filter_and_count_reads(self):
+    def v2_filter_and_count_reads(self):
 
         # Prepare error corrected barcode sets
         error_corrected_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], False)
@@ -483,8 +483,66 @@ class v2Demultiplexer():
 
         print_to_log('Closed up shop')
 
+    def v2_filter_for_david(self):
 
-    def v2_filter_and_count_reads(self):
+        # Prepare error corrected barcode sets
+        error_corrected_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], False)
+        error_corrected_rev_compl_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], True)
+
+        overall_filtering_statistics = defaultdict(int)
+
+        # Paths for the 4 expected FastQs
+        split_affix = self.parameters['split_affixes'][self.split_file_index]
+        input_fastqs = []
+        for r in [1, 2, 3, 4]:
+            input_fastqs.append(self.parameters['fastq_path_base'] % (split_affix, r))
+
+        output_fastqs = {}
+        for lib_index in self.libraries.keys():
+            output_fastqs[lib_index] = open(os.path.join(self.parameters['output_dir'], "%s.%s.fastq" % (lib_index, split_affix)), "w")
+
+        last_ping = time.time()
+        ping_every_n_reads = 1000000
+
+        for r_name, seqs, quals in self._weave_fastqs(input_fastqs):
+
+            # Python 3 compatibility in mind!
+            seqs = [s.decode('utf-8') for s in seqs]
+
+            keep, lib_index, result = self._v2_process_reads(r_name, seqs, quals,
+                                                    error_corrected_barcodes, error_corrected_rev_compl_barcodes, 
+                                                    self.sequence_to_index_mapping)
+            if keep:
+                bc, umi = result
+                bio_read = seqs[0]
+                bio_qual = quals[0]
+
+                new_read_name = 'S:' + bc.replace('-', ':') + ':' + umi + ':' + r_name
+
+                output_fastqs[lib_index].write(to_fastq(new_read_name, bio_read, bio_qual))
+                overall_filtering_statistics['Valid'] += 1
+
+            else:
+                overall_filtering_statistics[result] += 1
+
+            # Track speed per M reads
+            overall_filtering_statistics['Total'] += 1
+            
+            if overall_filtering_statistics['Total']%ping_every_n_reads == 0:
+                sec_per_mil = (time.time()-last_ping)/(float(ping_every_n_reads)/10**6)
+                last_ping = time.time()
+                print_to_log('%d reads parsed, kept %d reads, currently %.02f seconds/M reads.' % (overall_filtering_statistics['Total'], overall_filtering_statistics['Valid'], sec_per_mil))
+                
+                for k in ['Valid', 'Invalid_library_index', 'Invalid_BC1',  'Invalid_BC2', 'UMI_contains_N']:
+                    print_to_log("     %.02fpct %s" % (100.*overall_filtering_statistics[k]/overall_filtering_statistics['Total'], k))
+                print_to_log("     ----")
+
+        print_to_log('%d reads parsed, kept %d reads.' % (overall_filtering_statistics['Total'], overall_filtering_statistics['Valid']))
+
+
+        print_to_log('Closed up shop')
+
+    def DEBUG_v2_filter_and_count_reads(self):
 
         # Prepare error corrected barcode sets
         error_corrected_barcodes = build_barcode_neighborhoods(self.parameters['barcode_list'], False)
@@ -1430,7 +1488,7 @@ if __name__=="__main__":
         
         if args.command == 'v2_preprocess':
             demultiplexer = v2Demultiplexer(args.parameters, args.split_file_index)
-            demultiplexer.v2_filter_and_count_reads()
+            demultiplexer.v2_filter_for_david()
 
         elif args.command in ['preprocess', 'histogram', 'split_barcodes', 'quantify', 'aggregate', 'sort_bam', 'get_reads']:
             parameters = yaml.load(args.parameters)
