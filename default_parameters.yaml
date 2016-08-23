@@ -1,0 +1,27 @@
+paths : 
+  bowtie_dir : ''
+  rsem_dir : ''
+  python_dir : ''
+  java_dir : ''
+  samtools_dir : ''
+parameters : 
+  umi_quantification_arguments:
+    m : 10 #Ignore reads with more than M alignments, after filtering on distance from transcript end.
+    u : 1 #Ignore counts from UMI that should be split among more than U genes.
+    d : 600 #Maximal distance from transcript end, NOT INCLUDING THE POLYA TAIL
+    split-ambigs: False #If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)
+    min_non_polyA: 15 #Require reads to align to this much non-polyA sequence. (Set to 0 to disable filtering on this parameter.)
+  output_arguments:
+    output_unaligned_reads_to_other_fastq: False
+    filter_alignments_to_softmasked_regions: False
+  bowtie_arguments:
+    m : 200
+    n : 1
+    l : 15
+    e : 80
+  trimmomatic_arguments:
+    LEADING: "28"
+    SLIDINGWINDOW: "4:20"
+    MINLEN: "16"
+  low_complexity_filter_arguments:
+    max_low_complexity_fraction : 0.50

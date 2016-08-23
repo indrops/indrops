@@ -1,0 +1,52 @@
+project_name : "test"
+project_dir : "test/test_project/"
+sequencing_runs : 
+  - name : "Run1"
+    version : 'v1'
+    dir : "test/seq_runs/run_v1_single_file"
+    fastq_path : "{read}.fastq.gz"
+    library_name : "test_lib0"
+  - name : "Run2"
+    version : 'v2'
+    dir : "test/seq_runs/run_v2_single_file"
+    fastq_path : "{read}.fastq.gz"
+    library_name : "test_lib1"
+  - name : "Run3"
+    version : 'v2'
+    dir : "test/seq_runs/run_v2_split"
+    fastq_path : "{library_prefix}_{split_affix}_{read}_001.fastq.gz"
+    split_affixes : ["L001", "L002"]
+    libraries : 
+      - {library_name: "test_lib1", library_prefix: "lib1"}
+      - {library_name: "test_lib2", library_prefix: "lib2"}
+  - name : 'Run4'
+    version : 'v3'
+    dir : "test/seq_runs/run_v3"
+    fastq_path : "Undetermined_S0_{split_affix}_{read}_001.fastq.gz"
+    split_affixes : ["L001", "L002"]
+    libraries : 
+      - {library_name: "test_lib3", library_index: "ATAGAG"}
+      - {library_name: "test_lib4", library_index: "AGAGGA"}
+paths : 
+  bowtie_index : "/Users/averes/Projects/Melton/grch38_test/Homo_sapiens.GRCh38.85.annotated"
+  python_dir : "/Users/averes/miniconda3/envs/py27/bin/"
+  samtools_dir : "/Users/averes/software/samtools-1.3.1/bin/"
+# parameters : # OPTIONAL PARAMETERS
+#   umi_quantification_arguments:
+#     m : 10 #Ignore reads with more than M alignments, after filtering on distance from transcript end.
+#     u : 1 #Ignore counts from UMI that should be split among more than U genes.
+#     d : 600 #Maximal distance from transcript end, NOT INCLUDING THE POLYA TAIL
+#     split-ambigs: False #If umi is assigned to m genes, add 1/m to each gene's count (instead of 1)
+#     min_non_polyA: 15 #Require reads to align to this much non-polyA sequence. (Set to 0 to disable filtering on this parameter.)
+#   output_arguments:
+#     output_unaligned_reads_to_other_fastq: False
+#     low_complexity_mask: False
+#   bowtie_arguments:
+#     m : 200
+#     n : 1
+#     l : 15
+#     e : 1000
+#   trimmomatic_arguments:
+#     LEADING: "28"
+#     SLIDINGWINDOW: "4:20"
+#     MINLEN: "16"

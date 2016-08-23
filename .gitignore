@@ -1,0 +1,4 @@
+test/test_project
+yamls
+shell_traces
+*.pyc
