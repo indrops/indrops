@@ -22,7 +22,7 @@ import gzip
 # combination: Return r length subsequences of elements from the input iterable.
 from itertools import product, combinations
 import time
-import matplotlib
+
 import yaml
 import pysam
 
@@ -523,7 +523,7 @@ class IndropsLibrary():
             for part in self.parts:
                 with open(part.filtering_metrics_filename) as f:
                     part_stats = yaml.load(f)
-                    line = [part.run_name, part.part_name, sum(part_stats['read_structure'].values()), part_stats['read_structure']['Valid'], part_stats['trimmomatic']['output'], part_stats['complexity_filter']['output']]
+                    line = [part.run_name, part.part_name, part_stats['read_structure']['Total'], part_stats['read_structure']['Valid'], part_stats['trimmomatic']['output'], part_stats['complexity_filter']['output']]
                     line += [part_stats['read_structure'][k] for k in structure_parts]
                     line += [part_stats['trimmomatic'][k] for k in trimmomatic_parts]
                     line += [part_stats['complexity_filter'][k] for k in complexity_filter_parts]
@@ -546,6 +546,7 @@ class IndropsLibrary():
         w = x*y
 
         # need to use non-intenactive Agg backend
+        import matplotlib
         matplotlib.use('Agg')
         from matplotlib import pyplot as plt
         ax = plt.subplot(111)
@@ -590,168 +591,161 @@ class IndropsLibrary():
         merged_bam_index_filename = merged_bam_filename + '.bai'
 
         get_barcode_genomic_bam_filename = lambda bc: os.path.join(self.paths.quant_dir, '%s%s.genomic.sorted.bam' % (analysis_prefix, bc))
-        barcodes_with_genomic_bams = []
 
+        # If we wanted BAM output, and the merge BAM and merged BAM index are present, then we are done
+        if (not no_bam) and (os.path.isfile(merged_bam_filename) and os.path.isfile(merged_bam_index_filename)):
+            print_to_stderr('Indexed, merged BAM file detected for this worker. Done.')
+            return 
 
+        # Otherwise, we have to check what we need to quantify
 
-        # Load in things we previously ignored
-        if os.path.isfile(ignored_for_output_filename):
-            with open(ignored_for_output_filename, 'r') as f:
-                previously_ignored = set([line.rstrip().split('\t')[0] for line in f])
-        else:
-            previously_ignored = set()
+        
+        """
+        Function to determine which barcodes this quantification worker might have already quantified.
+        This tries to handle interruption during any step of the process.
 
-
+        The worker is assigned some list of barcodes L. For every barcode:
+            - It could have been quantified
+                - but have less than min_counts ---> so it got written to `ignored` file.
+                - and quantification succeeded, meaning
+                    1. there is a line (ending in \n) in the `metrics` file. 
+                    2. there is a line (ending in \n) in the `quantification` file.
+                    3. there (could) be a line (ending in \n) in the `ambiguous quantification` file.
+                    4. there (could) be a line (ending in \n) in the `ambiguous quantification partners` file.
+                        [If any line doesn't end in \n, then likely the output of that line was interrupted!]
+                    5. (If BAM output is desired) There should be a sorted genomic BAM
+                    6. (If BAM output is desired) There should be a sorted genomic BAM index
+        """
+        succesfully_previously_quantified = set()
+        previously_ignored = set()
         header_written = False
-        merged_bam_exists = False
-        merged_bam_index_exists = False
 
-        already_quantified = []
-        already_quantified_set = set()
-        not_properly_quantified = []
-        not_indexed = []
-
-
-        # Load in previous counts, so we can check which ones are valid and rerun invalid ones.
         if os.path.isfile(counts_output_filename) and os.path.isfile(metrics_output_filename):
-            merged_bam_exists = os.path.isfile(merged_bam_filename)
-            merged_bam_index_exists = os.path.isfile(merged_bam_index_filename)
+            # Load in list of ignored barcodes
+            if os.path.isfile(ignored_for_output_filename):
+                with open(ignored_for_output_filename, 'r') as f:
+                    previously_ignored = set([line.rstrip().split('\t')[0] for line in f])
 
-            # The metrics data is small, we can safely load it all into memory
-            previous_metrics_data = {}
+            # Load the metrics data into memory
+            # (It should be fairly small, this is fast and safe)
+            existing_metrics_data = {}
             with open(metrics_output_filename, 'r') as f:
-                previous_metrics_data = dict((line.partition('\t')[0], line) for line in f)
+                existing_metrics_data = dict((line.partition('\t')[0], line) for line in f if line[-1]=='\n')
 
 
-            # Quantification data could be large, so read each line and output it to back
-            #  - if that barcode has a matching metrics line!
-            # Identify this using regular counts
+            # Quantification data could be large, read it line by line and output it back for barcodes that have a matching metrics line.
             with open(counts_output_filename, 'r') as in_counts, \
-                 open(counts_output_filename+'.tmp', 'w') as tpm_counts, \
-                 open(metrics_output_filename+'.tmp', 'w') as tpm_metrics:
+                     open(counts_output_filename+'.tmp', 'w') as tmp_counts, \
+                     open(metrics_output_filename+'.tmp', 'w') as tmp_metrics:
 
-               
                 for line in in_counts:
-                    if not header_written:
-                        tpm_counts.write(line)
-                        tpm_metrics.write(previous_metrics_data['Barcode'])
+                    # The first worker is reponsible for written the header.
+                    # Make sure we carry that over
+                    if (not header_written) and (worker_index==0):
+                        tmp_counts.write(line)
+                        tmp_metrics.write(existing_metrics_data['Barcode'])
                         header_written = True
                         continue
 
+                    # This line has incomplete output, skip it.
+                    # (This can only happen with the last line)
+                    if line[-1] != '\n':
+                        continue
+
                     barcode = line.partition('\t')[0]
-                    barcode_needs_to_be_quantified = True
-                    barcode_genomic_bam_exists = os.path.isfile(get_barcode_genomic_bam_filename(barcode))
-                    if barcode in previous_metrics_data:
-                        # We have the quantification results - check that we either have a merged BAM or this barcode's individual bam
-                        if merged_bam_exists or barcode_genomic_bam_exists or no_bam:
-                            tpm_counts.write(line)
-                            tpm_metrics.write(previous_metrics_data[barcode])
-                            barcode_needs_to_be_quantified = False
-                            already_quantified.append(barcode)
-                            
-                            if barcode_genomic_bam_exists:
-                                barcodes_with_genomic_bams.append(barcode)
 
-                    if barcode_needs_to_be_quantified:
-                        not_properly_quantified.append(barcode)
+                    # Skip barcode if we don't have existing metrics data
+                    if barcode not in existing_metrics_data:
+                        continue
 
-            already_quantified_set = set(already_quantified)
+                    # Check if we BAM required BAM files exist
+                    barcode_genomic_bam_filename = get_barcode_genomic_bam_filename(barcode)
+                    bam_files_required_and_present = no_bam or (os.path.isfile(barcode_genomic_bam_filename) and os.path.isfile(barcode_genomic_bam_filename+'.bai'))
+                    if not bam_files_required_and_present:
+                        continue
+
+                    # This passed all the required checks, write the line to the temporary output files
+                    tmp_counts.write(line)
+                    tmp_metrics.write(existing_metrics_data[barcode])
+                    succesfully_previously_quantified.add(barcode)
+
             shutil.move(counts_output_filename+'.tmp', counts_output_filename)
             shutil.move(metrics_output_filename+'.tmp', metrics_output_filename)
 
-
             # For any 'already quantified' barcode, make sure we also copy over the ambiguity data
             with open(ambig_counts_output_filename, 'r') as in_f, \
-                 open(ambig_counts_output_filename+'.tmp', 'w') as tpm_f:
-                 f_first_line = True
+                 open(ambig_counts_output_filename+'.tmp', 'w') as tmp_f:
+                 f_first_line = (worker_index == 0)
                  for line in in_f:
                     if f_first_line:
-                        tpm_f.write(line)
+                        tmp_f.write(line)
                         f_first_line = False
                         continue
-                    if line.partition('\t')[0] in already_quantified_set:
-                        tpm_f.write(line)
+                    if (line.partition('\t')[0] in succesfully_previously_quantified) and (line[-1]=='\n'):
+                        tmp_f.write(line)
             shutil.move(ambig_counts_output_filename+'.tmp', ambig_counts_output_filename)
 
             with open(ambig_partners_output_filename, 'r') as in_f, \
-                 open(ambig_partners_output_filename+'.tmp', 'w') as tpm_f:
+                 open(ambig_partners_output_filename+'.tmp', 'w') as tmp_f:
                  for line in in_f:
-                    if line.partition('\t')[0] in already_quantified_set:
-                        tpm_f.write(line)
+                    if (line.partition('\t')[0] in succesfully_previously_quantified) and (line[-1]=='\n'):
+                        tmp_f.write(line)
             shutil.move(ambig_partners_output_filename+'.tmp', ambig_partners_output_filename)
 
+        barcodes_to_quantify = [bc for bc in barcodes_for_this_worker if (bc not in succesfully_previously_quantified and bc not in previously_ignored)]
 
-            
-        if merged_bam_exists:
-            # Merged BAM already exists (so individual BAMs we likely removed) - we either need to quantify everything, or nothing.
-            missing_barcodes_set = set(barcodes_for_this_worker) - set(already_quantified) - previously_ignored
-            if missing_barcodes_set:
-                # We need to reprocess everything
-                print_to_stderr('Had merged bam, but was missing quantification for %s.' % ','.join(sorted(missing_barcodes_set)))
-                barcodes_to_quantify = barcodes_for_this_worker
-                open(counts_output_filename, 'w').close()
-                open(metrics_output_filename, 'w').close()
-                header_written = False
-
-            else:
-                barcodes_to_quantify = []
-        else:
-            # Check which specific barcodes need to be quantified
-            not_properly_quantified_set = set(not_properly_quantified)
-            barcodes_to_quantify = []
-            for barcode in barcodes_for_this_worker:
-                if barcode in not_properly_quantified_set:
-                    barcodes_to_quantify.append(barcode)
-                elif barcode in previously_ignored or barcode in already_quantified_set:
-                    pass
-                else:
-                    barcodes_to_quantify.append(barcode)
 
         print_to_stderr("""[%s] This worker assigned %d out of %d total barcodes.""" % (self.name, len(barcodes_for_this_worker), len(sorted_barcode_names)))
         if len(barcodes_for_this_worker)-len(barcodes_to_quantify) > 0:
-            print_to_stderr("""    %d previously quantified, %s previously ingored. %d left for this run.""" % (len(already_quantified_set), len(previously_ignored), len(barcodes_to_quantify)))
+            print_to_stderr("""    %d previously quantified, %d previously ignored, %d left for this run.""" % (len(succesfully_previously_quantified), len(previously_ignored), len(barcodes_to_quantify)))
         
-        # Run the quantification for each barcode
-        if barcodes_to_quantify:
-            print_to_stderr(('{0:<14.12}'.format('Prefix') if analysis_prefix else '') + '{0:<14.12}{1:<9}'.format("Library", "Barcode"), False)
-            print_to_stderr("{0:<8s}{1:<8s}{2:<10s}".format("Reads", "Counts", "Ambigs"))
-            for barcode in barcodes_to_quantify:
-                barcode_has_bam_output = self.quantify_expression_for_barcode(barcode,
-                    counts_output_filename, metrics_output_filename,
-                    ambig_counts_output_filename, ambig_partners_output_filename,
-                    no_bam=no_bam, write_header=(not header_written), analysis_prefix=analysis_prefix,
-                    min_counts = min_counts, run_filter=run_filter)
-                header_written = True
-                if barcode_has_bam_output:
-                    barcodes_with_genomic_bams.append(barcode)
-
-        if not no_bam:
-            genomic_bams = [get_barcode_genomic_bam_filename(bc) for bc in barcodes_with_genomic_bams]
-            if not merged_bam_exists and genomic_bams:
-                try:
-                    subprocess.check_output([self.project.paths.samtools, 'merge', '-f', merged_bam_filename]+genomic_bams, stderr=subprocess.STDOUT)
-                    for filename in genomic_bams:
-                        os.remove(filename)
-                        os.remove(filename + '.bai')
-                    # Any existing index is now stale
-                    merged_bam_index_exists = False
-
-                except subprocess.CalledProcessError, err:
-                    print_to_stderr("   CMD: %s" % str(err.cmd)[:100])
-                    print_to_stderr("   stdout/stderr:")
-                    print_to_stderr(err.output)
-                    raise Exception(" === Error in samtools merge === ")
 
 
-            if not merged_bam_index_exists:
-                try:
-                    subprocess.check_output([self.project.paths.samtools, 'index', merged_bam_filename], stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError, err:
-                    print_to_stderr("   CMD: %s" % str(err.cmd)[:100])
-                    print_to_stderr("   stdout/stderr:")
-                    print_to_stderr(err.output)
-                    raise Exception(" === Error in samtools index === ")
+        print_to_stderr(('{0:<14.12}'.format('Prefix') if analysis_prefix else '') + '{0:<14.12}{1:<9}'.format("Library", "Barcode"), False)
+        print_to_stderr("{0:<8s}{1:<8s}{2:<10s}".format("Reads", "Counts", "Ambigs"))
+        for barcode in barcodes_to_quantify:
+            self.quantify_expression_for_barcode(barcode,
+                counts_output_filename, metrics_output_filename,
+                ambig_counts_output_filename, ambig_partners_output_filename,
+                no_bam=no_bam, write_header=(not header_written) and (worker_index==0), analysis_prefix=analysis_prefix,
+                min_counts = min_counts, run_filter=run_filter)
+            header_written = True
+        print_to_stderr("Per barcode quantification completed.")
 
+        if no_bam:
+            return
+
+        #Gather list of barcodes with output from the metrics file
+        genomic_bams = []
+        with open(metrics_output_filename, 'r') as f:
+            for line in f:
+                bc = line.partition('\t')[0]
+                if bc == 'Barcode': #This is the line in the header
+                    continue
+                genomic_bams.append(get_barcode_genomic_bam_filename(bc))
+
+        print_to_stderr("Merging BAM output.")
+        try:
+            subprocess.check_output([self.project.paths.samtools, 'merge', '-f', merged_bam_filename]+genomic_bams, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError, err:
+            print_to_stderr("   CMD: %s" % str(err.cmd)[:400])
+            print_to_stderr("   stdout/stderr:")
+            print_to_stderr(err.output)
+            raise Exception(" === Error in samtools merge === ")
+
+        print_to_stderr("Indexing merged BAM output.")
+        try:
+            subprocess.check_output([self.project.paths.samtools, 'index', merged_bam_filename], stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError, err:
+            print_to_stderr("   CMD: %s" % str(err.cmd)[:400])
+            print_to_stderr("   stdout/stderr:")
+            print_to_stderr(err.output)
+            raise Exception(" === Error in samtools index === ")
+
+        print(genomic_bams)
+        for filename in genomic_bams:
+            os.remove(filename)
+            os.remove(filename + '.bai')
 
     def quantify_expression_for_barcode(self, barcode, counts_output_filename, metrics_output_filename,
             ambig_counts_output_filename, ambig_partners_output_filename,
@@ -907,20 +901,10 @@ class IndropsLibrary():
 
             # Counts
             with open(counts_output_filename, 'r') as f:
-                if not end_of_counts_header:
-                    header = f.next()
-                    end_of_counts_header = f.tell()
-                    agg_counts.write(header)
-                f.seek(end_of_counts_header)
                 shutil.copyfileobj(f, agg_counts)
 
             # Metrics
             with open(metrics_output_filename, 'r') as f:
-                if not end_of_metrics_header:
-                    header = f.next()
-                    end_of_metrics_header = f.tell()
-                    agg_metrics.write(header)
-                f.seek(end_of_metrics_header)
                 shutil.copyfileobj(f, agg_metrics)
 
             # Ignored
@@ -929,20 +913,11 @@ class IndropsLibrary():
                     shutil.copyfileobj(f, agg_ignored)
 
             if process_ambiguity_data:
-                # Ambigs
                 with open(ambig_counts_output_filename, 'r') as f:
-                    if not end_of_ambigs_header:
-                        header = f.next()
-                        end_of_ambigs_header = f.tell()
-                        agg_ambigs.write(header)
-                    f.seek(end_of_ambigs_header)
                     shutil.copyfileobj(f, agg_ambigs)
 
                 with open(ambig_partners_output_filename, 'r') as f:
                     shutil.copyfileobj(f, agg_ambig_partners)
-
-            write_header = False
-
 
         print_to_stderr('  GZIPping concatenated output.')
         agg_counts.close()
@@ -976,22 +951,22 @@ class IndropsLibrary():
                 print_to_stderr(" === Error in samtools merge ===")
             print_to_stderr(p1.stderr.read())     
 
-        print_to_stderr('Deleting per-worker counts files.')
-        for worker_index in range(total_workers):
-            counts_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.counts.tsv' % (analysis_prefix, worker_index, total_workers))
-            os.remove(counts_output_filename)
+        # print_to_stderr('Deleting per-worker counts files.')
+        # for worker_index in range(total_workers):
+        #     counts_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.counts.tsv' % (analysis_prefix, worker_index, total_workers))
+        #     os.remove(counts_output_filename)
 
-            ambig_counts_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.ambig.counts.tsv' % (analysis_prefix, worker_index, total_workers))
-            os.remove(ambig_counts_output_filename)
+        #     ambig_counts_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.ambig.counts.tsv' % (analysis_prefix, worker_index, total_workers))
+        #     os.remove(ambig_counts_output_filename)
 
-            ambig_partners_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.ambig.partners' % (analysis_prefix, worker_index, total_workers))
-            os.remove(ambig_partners_output_filename)
+        #     ambig_partners_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.ambig.partners' % (analysis_prefix, worker_index, total_workers))
+        #     os.remove(ambig_partners_output_filename)
 
-            metrics_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.metrics.tsv' % (analysis_prefix, worker_index, total_workers))
-            os.remove(metrics_output_filename)
+        #     metrics_output_filename = os.path.join(self.paths.quant_dir, '%sworker%d_%d.metrics.tsv' % (analysis_prefix, worker_index, total_workers))
+        #     os.remove(metrics_output_filename)
 
-            ignored_for_output_filename = counts_output_filename+'.ignored'
-            os.remove(ignored_for_output_filename)
+        #     ignored_for_output_filename = counts_output_filename+'.ignored'
+        #     os.remove(ignored_for_output_filename)
         
 
 class LibrarySequencingPart():
@@ -1143,13 +1118,15 @@ class LibrarySequencingPart():
                     trimmomatic_cmd.append('%s:%s' % (arg, val))
 
                 p1 = subprocess.Popen(trimmomatic_cmd, stderr=subprocess.PIPE)
+
                 fifo1_filehandle = open(fifo1.filename, 'w')
                 yield fifo1_filehandle
                 fifo1_filehandle.close()
                 trimmomatic_stderr = p1.stderr.read().splitlines()
                 if trimmomatic_stderr[2] != 'TrimmomaticSE: Completed successfully':
                     raise Exception('Trimmomatic did not complete succesfully on %s' % filtered_filename)
-                trimmomatic_metrics = trimmomatic_stderr[1].split()  #['Input', 'Reads:', #READS, 'Surviving:', #SURVIVING, (%SURVIVING), 'Dropped:', #DROPPED, (%DROPPED)]
+                trimmomatic_metrics = trimmomatic_stderr[1].split() 
+                # ['Input', 'Reads:', #READS, 'Surviving:', #SURVIVING, (%SURVIVING), 'Dropped:', #DROPPED, (%DROPPED)]
                 trimmomatic_metrics = {'input' : trimmomatic_metrics[2], 'output': trimmomatic_metrics[4], 'dropped': trimmomatic_metrics[7]}
                 p1.wait()
 
@@ -1231,6 +1208,8 @@ class V1V2Filtering(LibrarySequencingPart):
                     last_ping = time.time()
 
             print_ping_to_log(False)
+
+        print_to_stderr(self.filtering_statistics_counter)
 
     def _weave_fastqs(self, r1_fastq, r2_fastq):
         """

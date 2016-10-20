@@ -207,7 +207,7 @@ This sorts the reads according to the name of their barcode of origin. Barcodes 
 As output, this creates a gzipped FastQ file and an index of the byte offsets for every barcode with more than 250 reads.
 
 ### 4. Quantify expression
-This iterates over a list barcodes, from a list of optionally filtered libraries. 
+This iterates over a list of barcodes, from a list of optionally filtered libraries. 
 
     python indrops.py project.yaml quantify [--total-workers 1] [--worker-index 0]
             [-l --libraries LIBRARIES] [-r --runs RUNS ]

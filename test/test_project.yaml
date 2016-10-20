@@ -31,7 +31,9 @@ paths :
   bowtie_index : "/Users/averes/Projects/Melton/grch38_test/Homo_sapiens.GRCh38.85.annotated"
   python_dir : "/Users/averes/miniconda3/envs/py27/bin/"
   samtools_dir : "/Users/averes/software/samtools-1.3.1/bin/"
-# parameters : # OPTIONAL PARAMETERS
+  rsem_dir : ""
+  java_dir : ""
+parameters : # OPTIONAL PARAMETERS
 #   umi_quantification_arguments:
 #     m : 10 #Ignore reads with more than M alignments, after filtering on distance from transcript end.
 #     u : 1 #Ignore counts from UMI that should be split among more than U genes.
@@ -46,7 +48,7 @@ paths :
 #     n : 1
 #     l : 15
 #     e : 1000
-#   trimmomatic_arguments:
-#     LEADING: "28"
-#     SLIDINGWINDOW: "4:20"
-#     MINLEN: "16"
+  trimmomatic_arguments:
+    LEADING: "28"
+    SLIDINGWINDOW: "4:20"
+    MINLEN: "16"
