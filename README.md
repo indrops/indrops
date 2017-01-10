@@ -2,14 +2,14 @@
 
 An inDrops project is composed of a series of sequencing runs, each including one (or several) indrops libraries within it. A sequencing run can further be split into several parts (effectively arbitrary chunks) to parallelize the analysis. Give example of a chunk
 
-The project yaml file contains the details of all sequencing runs and libraries within a project. 
+The project yaml file contains the details of all sequencing runs and libraries within a project.
 
-The same project can contain runs from different versions of the inDrops platform. 
+The same project can contain runs from different versions of the inDrops platform.
 
-A project will be aligned against the same reference genome with the same alignment parameters. 
+A project will be aligned against the same reference genome with the same alignment parameters.
 
 ## Supported library versions
-   - v1 : original design where R2 is the biological read and R1 is the metadata read. 
+   - v1 : original design where R2 is the biological read and R1 is the metadata read.
    - v2 : inversion of v1 where R1 is the biological read and R2 is the metadata read.
    - v3 : summer 2016 redesign requiring manual demultiplexing. R1 is the biological read.
           R2 carries the first half of the gel barcode, R3 carries the library index and R4
@@ -21,7 +21,7 @@ The package requires
   - RSEM (1.2.16+)
   - Bowtie (1.1.1+)
   - samtools (1.3.1+) [See Appendix 3] *This specific version is needed to account for a BAM-format oddity in RSEM output.
-  - Java 
+  - Java
 The path to the directories containing these executables should be set in the project YAML.
 If these executables can be found in the PATH variables, this project YAML paths can be left empty, or not specified.
 
@@ -31,7 +31,7 @@ An example YAML file is provided in `test/test_project.yaml`. It should contain 
 
     project_name : "project_name"
     project_dir : "/path/to/project/dir"  #This dir should be user-owned and writable, all output will go into this dir.
-    paths : 
+    paths :
       bowtie_index : "/path/to/index" #This index will be built automatically
       # The paths below can be omitted if the relevant directories are already on $PATH
       bowtie_dir : "/path/to/bowtie/dir/"
@@ -40,8 +40,8 @@ An example YAML file is provided in `test/test_project.yaml`. It should contain 
       rsem_dir: "/path/to/rsem/dir/"
       samtools_dir: "/path/to/samtools-1.3.1/bin/" #This needs to be version 1.3.1, 1.3 is not good enough!
 
-    sequencing_runs : 
-      # A list of sequencing runs which form the project. 
+    sequencing_runs :
+      # A list of sequencing runs which form the project.
       # Each run should have:
       - name : "MyRun" # The name of the run will be used as a prefix in filenames, so keep it sane.
         version : "vN" # Can be 'v1', 'v2' or 'v3'
@@ -68,7 +68,7 @@ An example YAML file is provided in `test/test_project.yaml`. It should contain 
         dir : "/path/to/run_files/"
         fastq_path : "{library_prefix}_{split_affix}_{read}.fastq.gz" # Read with be replaced by R1, R2, R3, R4 as appropriate.
         split_affixes : ["L001", "L002"]
-        libraries : 
+        libraries :
           - {library_name: "test_lib1", library_prefix: "lib1"}
           - {library_name: "test_lib2", library_prefix: "lib2"}
 
@@ -92,12 +92,15 @@ An example YAML file is provided in `test/test_project.yaml`. It should contain 
         #    /path/to/run_files/lib1_L003_R1.fastq.gz (and R2, R3, R4...)
         #    /path/to/run_files/lib1_L004_R1.fastq.gz (and R2, R3, R4...)
 
-#### Note about v3 runs. 
+#### Note about v3 runs.
 The raw BCL files are needed for manual demultiplexing. Move the raw BCL files to a run directory, then use the following command to extract the R1,R2,R3 and R4 files:
+
+```bash
     cd /run/dir/
     bcl2fastq --use-bases-mask y*,y*,y*,y* --mask-short-adapter-reads 0 --minimum-trimmed-read-length 0
     # The 'dir' used in the project YAML file should then be:
     #   /run/dir/Data/Intensities/BaseCalls/
+```
 
 ## Analysis steps
 
@@ -106,9 +109,9 @@ The raw BCL files are needed for manual demultiplexing. Move the raw BCL files t
 The index comprises a bowtie transcriptome index. It is built using RSEM so we can use `rsem-tbam2gbam` to convert between transcriptome and genome coordinates.
 The index also has an annotation of which locations are soft-masked (denoting low-complexity regions) to allow filtering of alignments primarily found in soft-masked regions.
 
-The index used by a project is give by `paths:bowtie_index` in the project YAML file. Several projects can share the same index. 
+The index used by a project is give by `paths:bowtie_index` in the project YAML file. Several projects can share the same index.
 Example:
-    paths : 
+    paths :
       bowtie_index : "/path/to/index_dir/indrops_ensembl_GRCh38_rel85/Homo_sapiens.GRCh38.85.annotated"
       ...more paths
 
@@ -123,7 +126,7 @@ If no index exists, it needs to be built
 
     # Download the corresponding GTF file.
     wget ftp://ftp.ensembl.org/pub/release-85/gtf/homo_sapiens/Homo_sapiens.GRCh38.85.gtf.gz
-    
+
     # This command will go through all the steps for creating the index
     python indrops.py project.yaml build_index \
         --genome-fasta-gz DOWNLOAD_DIR/Homo_sapiens.GRCh38.dna_sm.primary_assembly.fa.gz \
@@ -138,7 +141,7 @@ If no index exists, it needs to be built
 
     # Download the corresponding GTF file.
     wget ftp://ftp.ensembl.org/pub/release-85/gtf/mus_musculus/Mus_musculus.GRCm38.85.gtf.gz
-    
+
     # This command will go through all the steps for creating the index
     python indrops.py project.yaml build_index \
         --genome-fasta-gz DOWNLOAD_DIR/Mus_musculus.GRCm38.dna_sm.primary_assembly.fa.gz \
@@ -152,40 +155,40 @@ This iterates over sequencing run parts, optionally filtered by a list of sequen
           [-r --runs RUNS ] [-l --libraries LIBRARIES ]
 
     # --runs comma-separated list of runs :               If specified, step will be restricted to run parts coming #                                                     from runs in the list
-    # --libraries comma-separated list of libraries :      If specified, step will be restricted to run parts that 
+    # --libraries comma-separated list of libraries :      If specified, step will be restricted to run parts that
     #                                                     contain reads from a library in the list
-    # 
+    #
     # Resulting workload (a list of run parts), will be split among N --total-workers,
     # where worker with --worker-index i will do steps (i, N+i, 2N+i, ...)
 
 This step reads the raw FastQ files as input and filters them:
-  - For every raw read, it determines if the read has the expected structure (depending on library version). 
+  - For every raw read, it determines if the read has the expected structure (depending on library version).
   - For reads with correct structure, it runs Trimmomatic.
   - For reads surviving Trimmomatic, it finds and trims the polyA tail a maximum length of 4, and checks if the reads are still above MIN_LEN.
-  - For surviving reads, it determines which fraction of the read is composed of runs of the same base (only considering runs of 5 or more). 
+  - For surviving reads, it determines which fraction of the read is composed of runs of the same base (only considering runs of 5 or more).
     It rejects reads whose fraction is greater than `low_complexity_filter_arguments:max_low_complexity_fraction`.
 
 As output, for every input run part, this produces a filtered FastQ file for every library contained in that run. These files are referred to as 'parts of libraries'.
 
-A log is created detailing what happened to every input read. An index is created that lists the number of reads found for every barcode. 
+A log is created detailing what happened to every input read. An index is created that lists the number of reads found for every barcode.
 
 ### 2. Identify abundant barcodes
-This iterates over libraries, optionally filtered by a list. 
+This iterates over libraries, optionally filtered by a list.
 
     python indrops.py project.yaml identify_abundant_barcodes [--total-workers 1] [--worker-index 0]
           [-l --libraries LIBRARIES]
-  
+
     # --libraries comma-separated list of librares : If specified, step will be restricted to libraries in this list.
-    # 
+    #
     # Resulting workload (a list of libraries), will be split among N --total-workers,
     # where worker with --worker-index i will do steps (i, N+i, 2N+i, ...)
-    # 
+    #
     #    *Note* This step is fast, it does not need to be dispatched to several workers.
 
 For each library, this collates the results of filtering all the sequencing run parts that have reads related to this library. It then outputs,
   - Histogram of the distribution barcode abundances
   - Summary table of filtering for that library
-  - An index to be used by `sort`. 
+  - An index to be used by `sort`.
 
 
 ### 3. Sort reads according to their barcode of origin.
@@ -196,18 +199,18 @@ This iterates over parts of libraries, optionally filtered by a list.
 
     # --libraries comma-separated list of libraries :    If specified, step will be restricted to library-run-parts
     #                                                   that contain reads from a library in the list
-    # 
+    #
     # Resulting workload (a list of library-run-parts), will be split among N --total-workers,
     # where worker with --worker-index i will do steps (i, N+i, 2N+i, ...)
     #
-    #    *Note* this step is currently memory intensive, as it loads the entire 'library-run-part' in memory. 
+    #    *Note* this step is currently memory intensive, as it loads the entire 'library-run-part' in memory.
 
 This sorts the reads according to the name of their barcode of origin. Barcodes with less than 250 total reads (across all library-run-parts) are ignored, and placed at the end of the file.
 
 As output, this creates a gzipped FastQ file and an index of the byte offsets for every barcode with more than 250 reads.
 
 ### 4. Quantify expression
-This iterates over a list of barcodes, from a list of optionally filtered libraries. 
+This iterates over a list of barcodes, from a list of optionally filtered libraries.
 
     python indrops.py project.yaml quantify [--total-workers 1] [--worker-index 0]
             [-l --libraries LIBRARIES] [-r --runs RUNS ]
@@ -221,18 +224,18 @@ This iterates over a list of barcodes, from a list of optionally filtered librar
     #                                                   downstream processing.
     # --analysis-prefix STR :                           Prefix output data files with the specified prefix.
     #                                                   (filename --> prefix.filename)
-    # --no-bam :                                        If specified, do not output and process BAM files. 
-    # 
+    # --no-bam :                                        If specified, do not output and process BAM files.
+    #
     # --libraries comma-separated list of libraries      If specified, step will be restricted to libraries
     #                                                   in this list.
     # --runs comma-separated list of runs               If specified, only align reads coming from these runs
     #                                                   [This is an uncommon use case.]
-    # 
-    # 
+    #
+    #
     # The resulting list of barcodes will be split among --total-workers, with worker identified by --worker-index.
-    #    *Note* This step requires ~2Gb of memory. 
+    #    *Note* This step requires ~2Gb of memory.
 
-The reads from every barcode are aligned using Bowtie, and quantified to UMIFM counts. The counts and quantification metrics are written to a single file per worker. 
+The reads from every barcode are aligned using Bowtie, and quantified to UMIFM counts. The counts and quantification metrics are written to a single file per worker.
 
 The alignment themselves are modified to include relevant metadata and written to a BAM file. This BAM file is converted from transcriptomic to genomic-coordinates using `rsem-tbam2gbam`, sorted and indexed using `samtools`. At the end of this process, the BAMs for all the barcodes that were processed by a worker are merged and indexed (using `samtools`).
 
@@ -248,11 +251,11 @@ This iterates over a list of libraries
     # --total-workers INT :                             Total number of workers used in quantification step.
     # --analysis-prefix STR :                           Look for quantification data files with specified prefix.
     #                                                   (prefix.filename)
-    # 
+    #
     # --libraries comma-separated list of libraries      If specified, step will be restricted to libraries
     #                                                   in this list.
-    # 
-    # 
+    #
+    #
     # The resulting list of libraries will be split among --total-workers, with worker identified by --worker-index.
 
 The UMIFM counts and quantification metrics from all workers are concatenated to single files. These files are gzipped.
@@ -278,7 +281,7 @@ Every part of the analysis can be filtered based on both libraries and sequencin
 ### Dividing the analysis between jobs
 
 Most parts of the analysis can easily be divided for concurrent processing in different jobs,
-by specifying the total number of jobs (--total-workers) and the index of the current worker (--worker-index). 
+by specifying the total number of jobs (--total-workers) and the index of the current worker (--worker-index).
 
     # Submitting the 20 commands below would filter all run parts within the project in 20 different parts.
     python indrops.py test_project.yaml filter --total-workers 20 --worker-index [0-19]
