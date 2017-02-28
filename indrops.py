@@ -1114,7 +1114,8 @@ class LibrarySequencingPart():
 
                 trimmomatic_cmd = [self.project.paths.java, '-Xmx500m', '-jar', self.project.paths.trimmomatic_jar,
                         'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
-                for arg, val in self.project.parameters['trimmomatic_arguments'].items():
+                for arg in self.project.parameters['trimmomatic_arguments']['argument_order']:
+                    val = self.project.parameters['trimmomatic_arguments'][arg]
                     trimmomatic_cmd.append('%s:%s' % (arg, val))
 
                 p1 = subprocess.Popen(trimmomatic_cmd, stderr=subprocess.PIPE)
@@ -1489,11 +1490,13 @@ class V3Demultiplexer():
                 bio_qual = quals[0]
                 trim_processes[lib_index].write(to_fastq_lines(bc, umi, bio_read, bio_qual, r_name[1:]))
                 self.libraries[lib_index].filtering_statistics_counter['Valid'] += 1
+                self.libraries[lib_index].filtering_statistics_counter['Total'] += 1
                 overall_filtering_statistics['Valid'] += 1
 
             else:
                 if result != 'Invalid_library_index':
                     self.libraries[lib_index].filtering_statistics_counter[result] += 1
+                    self.libraries[lib_index].filtering_statistics_counter['Total'] += 1
                 overall_filtering_statistics[result] += 1
 
             # Track speed per M reads

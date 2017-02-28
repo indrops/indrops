@@ -23,5 +23,6 @@ parameters :
     LEADING: "28"
     SLIDINGWINDOW: "4:20"
     MINLEN: "16"
+    argument_order: ['LEADING', 'SLIDINGWINDOW', 'MINLEN']
   low_complexity_filter_arguments:
     max_low_complexity_fraction : 0.50
