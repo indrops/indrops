@@ -17,13 +17,22 @@ A project will be aligned against the same reference genome with the same alignm
 
 ## Installation
 The package requires
-  - Python 2.7 (with the packages numpy, scipy, matplotlib, pysam, pyyaml, pyfasta). [See Appendix 2]
+  - Python 2.7 (with the packages numpy, scipy, matplotlib, pysam>0.9.0, pyyaml, pyfasta). [See Appendix 2]
   - RSEM (1.2.16+)
   - Bowtie (1.1.1+)
   - samtools (1.3.1+) [See Appendix 3] *This specific version is needed to account for a BAM-format oddity in RSEM output.
   - Java 
 The path to the directories containing these executables should be set in the project YAML.
 If these executables can be found in the PATH variables, this project YAML paths can be left empty, or not specified.
+
+### March 7th Notice -- PySAM version.
+
+Previous installation instructions install PySAM version 0.6.0. To install the correct PySAM version, use the following commands:
+
+  conda remove pysam
+  conda install pip
+  pip install pysam==0.9.1
+
 
 ## Project YAML file
 
@@ -93,7 +102,8 @@ An example YAML file is provided in `test/test_project.yaml`. It should contain 
         #    /path/to/run_files/lib1_L004_R1.fastq.gz (and R2, R3, R4...)
 
 #### Note about v3 runs. 
-The raw BCL files are needed for manual demultiplexing. Move the raw BCL files to a run directory, then use the following command to extract the R1,R2,R3 and R4 files:
+The raw BCL files are needed for manual demultiplexing. Move the raw BCL files to a run directory, then use the following command to extract the R1,R2,R3 and R4 files.
+
     cd /run/dir/
     bcl2fastq --use-bases-mask y*,y*,y*,y* --mask-short-adapter-reads 0 --minimum-trimmed-read-length 0
     # The 'dir' used in the project YAML file should then be:
@@ -241,7 +251,7 @@ This step is resumable. If the same --analysis-prefix/--total-workers/--worker-i
 ### 5. Aggregate quantification results
 This iterates over a list of libraries
 
-    python indrops.py project.yaml quantify --total-workers 1
+    python indrops.py project.yaml aggregate --total-workers 1
             [-l --libraries LIBRARIES]
             [--analysis prefix '']
 
@@ -343,9 +353,9 @@ Install Miniconda
 Create a new Python environment (in this example, in /groups/klein/adrian/pyndrops)
 install Python2.7, Numpy, Scipy, Pandas, Matplotlib, PyYaml, PySAM
 
-    conda create -p /groups/klein/adrian/pyndrops python numpy scipy pandas pyyaml matplotlib pysam pip
+    conda create -p /groups/klein/adrian/pyndrops python numpy scipy pandas pyyaml matplotlib pip
     source activate /groups/klein/adrian/pyndrops
-    pip install pyfasta
+    pip install pyfasta pysam==0.9.1
 
 ## Appendix 3: Installing Samtools 1.3.1
 
