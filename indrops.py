@@ -568,6 +568,31 @@ class IndropsLibrary():
                 for line in part.get_reads_for_barcode(barcode):
                     yield line
 
+    def output_barcode_fastq(self, analysis_prefix='', min_reads=750, total_workers=1, worker_index=0, run_filter=[]):
+        if analysis_prefix:
+            analysis_prefix += '.'
+
+        output_dir_path = os.path.join(self.project.project_dir, self.name, 'barcode_fastq')
+        check_dir(output_dir_path)
+
+        sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads)
+
+        # Identify which barcodes belong to this worker
+        barcodes_for_this_worker = []
+        i = worker_index
+        while i < len(sorted_barcode_names):
+            barcodes_for_this_worker.append(sorted_barcode_names[i])
+            i += total_workers
+
+        print_to_stderr("""[%s] This worker assigned %d out of %d total barcodes.""" % (self.name, len(barcodes_for_this_worker), len(sorted_barcode_names)))        
+
+        for barcode in barcodes_for_this_worker:
+            barcode_fastq_filename = analysis_prefix+'%s.%s.fastq' % (self.name, barcode)
+            print_to_stderr("  "+barcode_fastq_filename)
+            with open(os.path.join(output_dir_path, barcode_fastq_filename), 'w') as f:
+                for line in self.get_reads_for_barcode(barcode, run_filter):
+                    f.write(line)
+
     def quantify_expression(self, analysis_prefix='', min_reads=750, min_counts=0, total_workers=1, worker_index=0, no_bam=False, run_filter=[]):
         if analysis_prefix:
             analysis_prefix += '.'
@@ -1530,7 +1555,7 @@ if __name__=="__main__":
     parser.add_argument('project', type=argparse.FileType('r'), help='Project YAML File.')
     parser.add_argument('-l', '--libraries', type=str, help='[all] Library name(s) to work on. If blank, will iterate over all libraries in project.', nargs='?', default='')
     parser.add_argument('-r', '--runs', type=str, help='[all] Run name(s) to work on. If blank, will iterate over all runs in project.', nargs='?', default='')
-    parser.add_argument('command', type=str, choices=['info', 'filter', 'identify_abundant_barcodes', 'sort', 'quantify', 'aggregate', 'build_index', 'get_reads'])
+    parser.add_argument('command', type=str, choices=['info', 'filter', 'identify_abundant_barcodes', 'sort', 'quantify', 'aggregate', 'build_index', 'get_reads', 'output_barcode_fastq'])
     parser.add_argument('--total-workers', type=int, help='[all] Total workers that are working together. This takes precedence over barcodes-per-worker.', default=1)
     parser.add_argument('--worker-index', type=int, help='[all] Index of current worker (the first worker should have index 0).', default=0)
     parser.add_argument('--min-reads', type=int, help='[quantify] Minimun number of reads for barcode to be processed', nargs='?', default=750)
@@ -1632,3 +1657,8 @@ if __name__=="__main__":
             for part in project.libraries[library].parts:
                 if hasattr(part, '_sorted_index'):
                     del part._sorted_index
+
+    elif args.command == 'output_barcode_fastq':
+        for library in target_libraries:
+            project.libraries[library].output_barcode_fastq(worker_index=args.worker_index, total_workers=args.total_workers,
+                    min_reads=args.min_reads, analysis_prefix=args.analysis_prefix, run_filter=target_runs)
