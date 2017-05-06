@@ -47,9 +47,9 @@ def string_hamming_distance(str1, str2):
     """
     return sum(itertools.imap(operator.ne, str1, str2))
 
+___tbl = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
 def rev_comp(seq):
-    tbl = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
-    return ''.join(tbl[s] for s in seq[::-1])
+    return ''.join(___tbl[s] for s in seq[::-1])
 
 
 def to_fastq(name, seq, qual):
@@ -268,14 +268,15 @@ class IndropsProject():
                         self.runs[run['name']].append(part)
                         self.libraries[lib_name].parts.append(part)
 
-            elif run['version'] == 'v3':
+            elif run['version'] == 'v3' or run['version'] == 'v3-miseq':
                 for affix in split_affixes:
                     filtered_part_filename = filtered_filename.format(run_name=run['name'], split_affix=affix,
                         library_name='{library_name}', library_index='{library_index}')
                     part_filename = os.path.join(self.project_dir, '{library_name}', 'filtered_parts', filtered_part_filename)
 
                     input_filename = os.path.join(run['dir'], run['fastq_path'].format(split_affix=affix, read='{read}'))
-                    part = V3Demultiplexer(run['libraries'], project=self, part_filename=part_filename, input_filename=input_filename, run_name=run['name'], part_name=affix)
+                    part = V3Demultiplexer(run['libraries'], project=self, part_filename=part_filename, input_filename=input_filename, run_name=run['name'], part_name=affix,
+                        run_version_details=run['version'])
 
                     if run['name'] not in self.runs:
                         self.runs[run['name']] = []
@@ -374,6 +375,7 @@ class IndropsProject():
                 'v1' : v1v2_names,
                 'v2' : v1v2_names,
                 'v3': v3_names,
+                'v3-miseq':v3_names,
             }
         return self._stable_barcode_names
 
@@ -508,7 +510,7 @@ class IndropsLibrary():
             if self.version == 'v1' or self.version == 'v2':
                 structure_parts = ['W1_in_R2', 'empty_read',  'No_W1', 'No_polyT', 'BC1', 'BC2', 'Umi_error']
                 header += ['W1 in R2', 'empty read',  'No W1 in R1', 'No polyT', 'BC1', 'BC2', 'UMI_contains_N']
-            elif self.version == 'v3':
+            elif self.version == 'v3' or self.version == 'v3-miseq':
                 structure_parts = ['Invalid_BC1', 'Invalid_BC2', 'UMI_contains_N']
                 header += ['Invalid BC1', 'Invalid BC2', 'UMI_contains_N']
 
@@ -1376,8 +1378,9 @@ class V1V2Filtering(LibrarySequencingPart):
 
 class V3Demultiplexer():
 
-    def __init__(self, library_indices, project=None, part_filename="", input_filename="", run_name="", part_name=""):
+    def __init__(self, library_indices, project=None, part_filename="", input_filename="", run_name="", part_name="", run_version_details="v3"):
 
+        self.run_version_details = run_version_details
         self.input_filename = input_filename
         self.project = project
         self.run_name = run_name
@@ -1424,6 +1427,9 @@ class V3Demultiplexer():
         """
 
         r1, r2, r3, r4 = seqs
+        if self.run_version_details=='v3-miseq':
+            r2 = rev_comp(r2)
+            r4 = rev_comp(r4)
 
         if r3 in valid_libs:
             lib_index = valid_libs[r3]
