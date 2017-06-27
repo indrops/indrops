@@ -18,7 +18,7 @@ A project will be aligned against the same reference genome with the same alignm
 ## Installation
 The package requires
   - Python 2.7 (with the packages numpy, scipy, matplotlib, pysam>0.9.0, pyyaml, pyfasta). [See Appendix 2]
-  - RSEM (1.2.16+)
+  - RSEM (1.2.19+)
   - Bowtie (1.1.1+)
   - samtools (1.3.1+) [See Appendix 3] *This specific version is needed to account for a BAM-format oddity in RSEM output.
   - Java 

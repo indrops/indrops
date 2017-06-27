@@ -379,7 +379,74 @@ class IndropsProject():
             }
         return self._stable_barcode_names
 
-    def build_transcriptome(self, gzipped_genome_softmasked_fasta_filename, gzipped_transcriptome_gtf):
+    def filter_gtf(self, gzipped_transcriptome_gtf, gtf_with_genenames_in_transcript_id):
+
+        # A small number of gene are flagged as having two different biotypes.
+        gene_biotype_dict = defaultdict(set)
+
+        # Read through GTF file once to get all gene names
+        for line in subprocess.Popen(["gzip", "--stdout", "-d", gzipped_transcriptome_gtf], stdout=subprocess.PIPE).stdout:
+            # Skip non-gene feature lines.
+            if '\tgene\t' not in line:
+                continue
+                
+            gene_biotype_match = re.search(r'gene_biotype \"(.*?)\";', line)
+            gene_name_match = re.search(r'gene_name \"(.*?)\";', line)
+            if gene_name_match and gene_biotype_match:
+                gene_name = gene_name_match.group(1)
+                gene_biotype = gene_biotype_match.group(1)
+                
+                # Record biotype.
+                gene_biotype_dict[gene_name].add(gene_biotype)
+
+        # Detect read-through genes by name. Name must be a fusion of two other gene names 'G1-G2'.
+        readthrough_genes = set()
+        for gene in gene_biotype_dict.keys():
+            if '-' in gene and len(gene.split('-')) == 2:
+                g1, g2 = gene.split('-')
+                if g1 in gene_biotype_dict and g2 in gene_biotype_dict:
+                    readthrough_genes.add(gene)
+
+
+        # Detect pseudogenes: genes where all associated biotypes have 'pseudogene' in name
+        pseudogenes = set()
+        for gene, biotypes in gene_biotype_dict.items():
+            if all('pseudogene' in b for b in biotypes):
+                pseudogenes.add(gene)
+
+        all_genes = set(gene_biotype_dict.keys())
+        valid_genes = all_genes.difference(pseudogenes).difference(readthrough_genes)
+
+        transcripts_counter = defaultdict(int)
+
+
+        # Go through GTF file again, annotating each transcript_id with the gene and outputting to a new GTF file.
+        output_gtf = open(gtf_with_genenames_in_transcript_id, 'w')
+        for line in subprocess.Popen(["gzip", "--stdout", "-d", gzipped_transcriptome_gtf], stdout=subprocess.PIPE).stdout:
+            # Skip non-transcript feature lines.
+            if 'transcript_id' not in line:
+                continue
+                
+            gene_name_match = re.search(r'gene_name \"(.*?)\";', line)
+            if gene_name_match:
+                gene_name = gene_name_match.group(1)
+                if gene_name in valid_genes:
+                    out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
+                    output_gtf.write(out_line)
+                    if '\ttranscript\t' in line:
+                        transcripts_counter['valid'] += 1
+                elif gene_name in pseudogenes and '\ttranscript\t' in line:
+                    transcripts_counter['pseudogenes'] += 1
+                elif gene_name in readthrough_genes and '\ttranscript\t' in line:
+                    transcripts_counter['readthrough_genes'] += 1
+        output_gtf.close()
+
+        print_to_stderr('Filtered GTF contains %d transcripts (%d genes)' % (transcripts_counter['valid'], len(valid_genes)))
+        print_to_stderr('   - ignored %d transcripts from %d pseudogenes)' % (transcripts_counter['pseudogenes'], len(pseudogenes)))
+        print_to_stderr('   - ignored %d read-through transcripts (%d genes)' % (transcripts_counter['readthrough_genes'], len(readthrough_genes)))
+
+    def build_transcriptome(self, gzipped_genome_softmasked_fasta_filename, gzipped_transcriptome_gtf,
+            mode='strict'):
         import pyfasta
         
         index_dir = os.path.dirname(self.paths.bowtie_index)
@@ -389,36 +456,48 @@ class IndropsProject():
 
         gtf_filename = os.path.join(index_dir, gzipped_transcriptome_gtf.split('/')[-1])
         gtf_prefix = '.'.join(gtf_filename.split('.')[:-2])
-        gtf_with_genenames_in_transcript_id = gtf_prefix + '.annotated.gtf'
-
-        accepted_gene_biotypes_for_NA_transcripts = set(["protein_coding","IG_V_gene","IG_J_gene","TR_J_gene","TR_D_gene","TR_V_gene","IG_C_gene","IG_D_gene","TR_C_gene"])
-        tsl1_or_tsl2_strings = ['transcript_support_level "1"', 'transcript_support_level "1 ', 'transcript_support_level "2"', 'transcript_support_level "2 ']
-        tsl_NA =  'transcript_support_level "NA'
+        # gtf_with_genenames_in_transcript_id = gtf_prefix + '.annotated.gtf'
+        gtf_with_genenames_in_transcript_id = self.paths.bowtie_index + '.gtf'
 
         print_to_stderr('Filtering GTF')
-        output_gtf = open(gtf_with_genenames_in_transcript_id, 'w')
-        for line in subprocess.Popen(["gzip", "--stdout", "-d", gzipped_transcriptome_gtf], stdout=subprocess.PIPE).stdout:
-            if 'transcript_id' not in line:
-                continue
+        self.filter_gtf(gzipped_transcriptome_gtf, gtf_with_genenames_in_transcript_id)
+        # accepted_gene_biotypes_for_NA_transcripts = set(["protein_coding","IG_V_gene","IG_J_gene","TR_J_gene","TR_D_gene","TR_V_gene","IG_C_gene","IG_D_gene","TR_C_gene"])
+        # tsl1_or_tsl2_strings = ['transcript_support_level "1"', 'transcript_support_level "1 ', 'transcript_support_level "2"', 'transcript_support_level "2 ']
+        # tsl_NA =  'transcript_support_level "NA'
 
-            line_valid_for_output = False
-            for string in tsl1_or_tsl2_strings:
-                if string in line:
-                    line_valid_for_output = True
-                    break
-            
-            if tsl_NA in line:
-                gene_biotype = re.search(r'gene_biotype \"(.*?)\";', line)
-                if gene_biotype and gene_biotype.group(1) in accepted_gene_biotypes_for_NA_transcripts:
-                    line_valid_for_output = True
+        # def filter_ensembl_transcript(transcript_line):
 
-            if line_valid_for_output:
-                gene_name = re.search(r'gene_name \"(.*?)\";', line)
-                if gene_name:
-                    gene_name = gene_name.group(1)
-                    out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
-                    output_gtf.write(out_line)
-        output_gtf.close()
+        #     line_valid_for_output = False
+        #     if mode == 'strict':
+        #         for string in tsl1_or_tsl2_strings:
+        #             if string in line:
+        #                 line_valid_for_output = True
+        #                 break
+        #         if tsl_NA in line:
+        #             gene_biotype = re.search(r'gene_biotype \"(.*?)\";', line)
+        #             if gene_biotype and gene_biotype.group(1) in accepted_gene_biotypes_for_NA_transcripts:
+        #                 line_valid_for_output = True
+        #         return line_valid_for_output
+
+        #     elif mode == 'all_ensembl':
+        #         line_valid_for_output = True
+        #         return line_valid_for_output
+
+
+
+        # print_to_stderr('Filtering GTF')
+        # output_gtf = open(gtf_with_genenames_in_transcript_id, 'w')
+        # for line in subprocess.Popen(["gzip", "--stdout", "-d", gzipped_transcriptome_gtf], stdout=subprocess.PIPE).stdout:
+        #     if 'transcript_id' not in line:
+        #         continue
+
+        #     if filter_ensembl_transcript(line):
+        #         gene_name = re.search(r'gene_name \"(.*?)\";', line)
+        #         if gene_name:
+        #             gene_name = gene_name.group(1)
+        #             out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
+        #             output_gtf.write(out_line)
+        # output_gtf.close()
 
         print_to_stderr('Gunzipping Genome')
         p_gzip = subprocess.Popen(["gzip", "-dfc", gzipped_genome_softmasked_fasta_filename], stdout=open(genome_filename, 'wb'))
@@ -572,7 +651,7 @@ class IndropsLibrary():
 
     def output_barcode_fastq(self, analysis_prefix='', min_reads=750, total_workers=1, worker_index=0, run_filter=[]):
         if analysis_prefix:
-            analysis_prefix += '.'
+            analysis_prefix = '.' + analysis_prefix
 
         output_dir_path = os.path.join(self.project.project_dir, self.name, 'barcode_fastq')
         check_dir(output_dir_path)
@@ -597,7 +676,7 @@ class IndropsLibrary():
 
     def quantify_expression(self, analysis_prefix='', min_reads=750, min_counts=0, total_workers=1, worker_index=0, no_bam=False, run_filter=[]):
         if analysis_prefix:
-            analysis_prefix += '.'
+            analysis_prefix = '.' + analysis_prefix
 
         sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads)
 
@@ -881,7 +960,7 @@ class IndropsLibrary():
 
     def aggregate_counts(self, analysis_prefix='', process_ambiguity_data=False):
         if analysis_prefix:
-            analysis_prefix += '.'
+            analysis_prefix = '.' + analysis_prefix
         
         quant_output_files = [fn[len(analysis_prefix):].split('.')[0] for fn in os.listdir(self.paths.quant_dir) if ('worker' in fn and fn[:len(analysis_prefix)]==analysis_prefix)]
         worker_names = [w[6:] for w in quant_output_files]
@@ -1570,6 +1649,7 @@ if __name__=="__main__":
     parser.add_argument('--no-bam', help='[quantify] Do not output alignments to bam file.', action='store_true')
     parser.add_argument('--genome-fasta-gz', help='[build_index] Path to gzipped soft-masked genomic FASTA file.')
     parser.add_argument('--ensembl-gtf-gz', help='[build_index] Path to gzipped ENSEMBL GTF file. ')
+    parser.add_argument('--mode', help='[build_index] Stringency mode for transcriptome build. [strict|all_ensembl]', default='strict')
     parser.add_argument('--override-yaml', help="[all] Dictionnary to update project YAML with.. [You don't need this.]", nargs='?', default='')
 
     args = parser.parse_args()
@@ -1651,7 +1731,7 @@ if __name__=="__main__":
             project.libraries[library].aggregate_counts(analysis_prefix=args.analysis_prefix)
 
     elif args.command == 'build_index':
-        project.build_transcriptome(args.genome_fasta_gz, args.ensembl_gtf_gz)
+        project.build_transcriptome(args.genome_fasta_gz, args.ensembl_gtf_gz, mode=args.mode)
 
     elif args.command == 'get_reads':
         for library in target_libraries:
