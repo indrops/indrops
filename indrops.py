@@ -630,12 +630,13 @@ class IndropsLibrary():
         import matplotlib
         matplotlib.use('Agg')
         from matplotlib import pyplot as plt
-        ax = plt.subplot(111)
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         ax.hist(x, bins=np.logspace(0, 6, 50), weights=w)
         ax.set_xscale('log')
         ax.set_xlabel('Reads per barcode')
         ax.set_ylabel('#reads coming from bin')
-        plt.savefig(self.paths.barcode_abundance_histogram_filename)
+        fig.savefig(self.paths.barcode_abundance_histogram_filename)
 
         print_to_stderr("Created Barcode Abundance Histogram at:")
         print_to_stderr("  " + self.paths.barcode_abundance_histogram_filename)
