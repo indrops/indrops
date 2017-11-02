@@ -431,6 +431,11 @@ class IndropsProject():
             if gene_name_match:
                 gene_name = gene_name_match.group(1)
                 if gene_name in valid_genes:
+                    
+                    # An unusual edgecase in the GTF for Danio Rerio rel89
+                    if ' ' in gene_name:
+                        gene_name = gene_name.replace(' ', '_')
+
                     out_line = re.sub(r'(?<=transcript_id ")(.*?)(?=";)', r'\1|'+gene_name, line)
                     output_gtf.write(out_line)
                     if '\ttranscript\t' in line:
@@ -540,6 +545,7 @@ class IndropsLibrary():
         self.paths.abundant_barcodes_names_filename = os.path.join(self.project.project_dir, self.name, 'abundant_barcodes.pickle')
         self.paths.filtering_statistics_filename = os.path.join(self.project.project_dir, self.name, self.name+'.filtering_stats.csv')
         self.paths.barcode_abundance_histogram_filename = os.path.join(self.project.project_dir, self.name, self.name+'.barcode_abundance.png')
+        self.paths.barcode_abundance_by_barcode_filename = os.path.join(self.project.project_dir, self.name, self.name+'.barcode_abundance_by_barcode.png')
         self.paths.missing_quants_filename = os.path.join(self.project.project_dir, self.name, self.name+'.missing_barcodes.pickle')
 
     @property
@@ -559,8 +565,8 @@ class IndropsLibrary():
                 self._abundant_barcodes = pickle.load(f)
         return self._abundant_barcodes
 
-    def sorted_barcode_names(self, min_reads=0):
-        return [name for bc,(name,abun) in sorted(self.abundant_barcodes.items(), key=lambda i:-i[1][1]) if abun>min_reads]
+    def sorted_barcode_names(self, min_reads=0, max_reads=10**10):
+        return [name for bc,(name,abun) in sorted(self.abundant_barcodes.items(), key=lambda i:-i[1][1]) if (abun>min_reads) & (abun<max_reads)]
 
     def identify_abundant_barcodes(self, make_histogram=True, absolute_min_reads=250):
         """
@@ -632,7 +638,7 @@ class IndropsLibrary():
         from matplotlib import pyplot as plt
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        ax.hist(x, bins=np.logspace(0, 6, 50), weights=w)
+        ax.hist(x, bins=np.logspace(0, 6, 50), weights=w, color='green')
         ax.set_xscale('log')
         ax.set_xlabel('Reads per barcode')
         ax.set_ylabel('#reads coming from bin')
@@ -640,6 +646,18 @@ class IndropsLibrary():
 
         print_to_stderr("Created Barcode Abundance Histogram at:")
         print_to_stderr("  " + self.paths.barcode_abundance_histogram_filename)
+
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.hist(list(self.barcode_counts.values()), bins=np.logspace(2, 6, 50), color='green')
+        ax.set_xlim((1, 10**6))
+        ax.set_xscale('log')
+        ax.set_xlabel('Reads per barcode')
+        ax.set_ylabel('# of barcodes')
+        fig.savefig(self.paths.barcode_abundance_by_barcode_filename)
+        print_to_stderr("Created Barcode Abundance Histogram by barcodes at:")
+        print_to_stderr("  " + self.paths.barcode_abundance_by_barcode_filename)
 
     def sort_reads_by_barcode(self, index=0):
         self.parts[index].sort_reads_by_barcode(self.abundant_barcodes)
@@ -650,14 +668,14 @@ class IndropsLibrary():
                 for line in part.get_reads_for_barcode(barcode):
                     yield line
 
-    def output_barcode_fastq(self, analysis_prefix='', min_reads=750, total_workers=1, worker_index=0, run_filter=[]):
+    def output_barcode_fastq(self, analysis_prefix='', min_reads=750, max_reads=10**10, total_workers=1, worker_index=0, run_filter=[]):
         if analysis_prefix:
             analysis_prefix = '.' + analysis_prefix
 
         output_dir_path = os.path.join(self.project.project_dir, self.name, 'barcode_fastq')
         check_dir(output_dir_path)
 
-        sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads)
+        sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads, max_reads=max_reads)
 
         # Identify which barcodes belong to this worker
         barcodes_for_this_worker = []
@@ -675,11 +693,11 @@ class IndropsLibrary():
                 for line in self.get_reads_for_barcode(barcode, run_filter):
                     f.write(line)
 
-    def quantify_expression(self, analysis_prefix='', min_reads=750, min_counts=0, total_workers=1, worker_index=0, no_bam=False, run_filter=[]):
+    def quantify_expression(self, analysis_prefix='', max_reads=10**10, min_reads=750, min_counts=0, total_workers=1, worker_index=0, no_bam=False, run_filter=[]):
         if analysis_prefix:
             analysis_prefix = '.' + analysis_prefix
 
-        sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads)
+        sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads, max_reads=max_reads)
 
         # Identify which barcodes belong to this worker
         barcodes_for_this_worker = []
@@ -906,7 +924,13 @@ class IndropsLibrary():
         
                 
         for line in self.get_reads_for_barcode(barcode, run_filter=run_filter):
-            p1.stdin.write(line)
+            try:
+                p1.stdin.write(line)
+            except IOError as e:
+                print_to_stderr('\n')
+                print_to_stderr(p1.stderr.read())
+                raise Exception('\n === Error on piping data to bowtie ===')
+
 
         p1.stdin.close()
 
@@ -1644,7 +1668,8 @@ if __name__=="__main__":
     parser.add_argument('command', type=str, choices=['info', 'filter', 'identify_abundant_barcodes', 'sort', 'quantify', 'aggregate', 'build_index', 'get_reads', 'output_barcode_fastq'])
     parser.add_argument('--total-workers', type=int, help='[all] Total workers that are working together. This takes precedence over barcodes-per-worker.', default=1)
     parser.add_argument('--worker-index', type=int, help='[all] Index of current worker (the first worker should have index 0).', default=0)
-    parser.add_argument('--min-reads', type=int, help='[quantify] Minimun number of reads for barcode to be processed', nargs='?', default=750)
+    parser.add_argument('--min-reads', type=int, help='[quantify] Minimum number of reads for barcode to be processed', nargs='?', default=750)
+    parser.add_argument('--max-reads', type=int, help='[quantify] Maximum number of reads for barcode to be processed', nargs='?', default=100000000)
     parser.add_argument('--min-counts', type=int, help='[aggregate] Minimun number of UMIFM counts for barcode to be aggregated', nargs='?', default=0)
     parser.add_argument('--analysis-prefix', type=str, help='[quantify/aggregate/convert_bam/merge_bam] Prefix for analysis files.', nargs='?', default='')
     parser.add_argument('--no-bam', help='[quantify] Do not output alignments to bam file.', action='store_true')
@@ -1704,7 +1729,7 @@ if __name__=="__main__":
             target_run_parts += [part for part in project.runs[run] if part.contains_library_in_query(lib_query)]
 
         for part in worker_filter(target_run_parts, args.worker_index, args.total_workers):
-            print_to_stderr('Filtering run "%s", part "%s"' % (part.run_name, part.part_name))
+            print_to_stderr('Filtering run "%s", library "%s", part "%s"' % (part.run_name, part.library_name if hasattr(part, 'library_name') else 'N/A', part.part_name))
             part.filter_and_count_reads()
 
     elif args.command == 'identify_abundant_barcodes':
@@ -1719,7 +1744,7 @@ if __name__=="__main__":
     elif args.command == 'quantify':
         for library in target_libraries:
             project.libraries[library].quantify_expression(worker_index=args.worker_index, total_workers=args.total_workers,
-                    min_reads=args.min_reads, min_counts=args.min_counts,
+                    min_reads=args.min_reads, max_reads=args.max_reads, min_counts=args.min_counts,
                     analysis_prefix=args.analysis_prefix,
                     no_bam=args.no_bam, run_filter=target_runs)
 
@@ -1736,7 +1761,7 @@ if __name__=="__main__":
 
     elif args.command == 'get_reads':
         for library in target_libraries:
-            sorted_barcode_names = project.libraries[library].sorted_barcode_names(min_reads=args.min_reads)
+            sorted_barcode_names = project.libraries[library].sorted_barcode_names(min_reads=args.min_reads, max_reads=args.max_reads)
             for bc in sorted_barcode_names:
                 for line in project.libraries[library].get_reads_for_barcode(bc, run_filter=target_runs):
                     sys.stdout.write(line)
@@ -1748,4 +1773,4 @@ if __name__=="__main__":
     elif args.command == 'output_barcode_fastq':
         for library in target_libraries:
             project.libraries[library].output_barcode_fastq(worker_index=args.worker_index, total_workers=args.total_workers,
-                    min_reads=args.min_reads, analysis_prefix=args.analysis_prefix, run_filter=target_runs)
+                    min_reads=args.min_reads, max_reads=args.max_reads, analysis_prefix=args.analysis_prefix, run_filter=target_runs)
