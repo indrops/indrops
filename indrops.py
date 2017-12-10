@@ -611,9 +611,9 @@ class IndropsLibrary():
                 with open(part.filtering_metrics_filename) as f:
                     part_stats = yaml.load(f)
                     line = [part.run_name, part.part_name, part_stats['read_structure']['Total'], part_stats['read_structure']['Valid'], part_stats['trimmomatic']['output'], part_stats['complexity_filter']['output']]
-                    line += [part_stats['read_structure'][k] for k in structure_parts]
-                    line += [part_stats['trimmomatic'][k] for k in trimmomatic_parts]
-                    line += [part_stats['complexity_filter'][k] for k in complexity_filter_parts]
+                    line += [part_stats['read_structure'][k] if k in part_stats['read_structure'] else 0 for k in structure_parts]
+                    line += [part_stats['trimmomatic'][k] if k in part_stats['trimmomatic'] else 0 for k in trimmomatic_parts]
+                    line += [part_stats['complexity_filter'][k] if k in part_stats['complexity_filter'] else 0 for k in complexity_filter_parts]
                     line = [str(l) for l in line]
                     filtering_stats.write(','.join(line)+'\n')
 
