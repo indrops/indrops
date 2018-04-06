@@ -300,7 +300,8 @@ def quant(args):
                     for g_alt in ambig_partners:
                         ambig_gene_partners[g_alt].add(frozenset(ambig_partners))
                         target_genes[g_alt] = float(len(ambig_partners))
-                        ambig_clique_count[len(ambig_partners)].append(umi)
+                        if len(ambig_partners) != 1:
+                            ambig_clique_count[len(ambig_partners)].append(umi)
 
             else:
                 umifm_assigned_unambiguously = True
