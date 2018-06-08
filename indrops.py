@@ -674,7 +674,7 @@ class IndropsLibrary():
 
     def output_barcode_fastq(self, analysis_prefix='', min_reads=750, max_reads=10**10, total_workers=1, worker_index=0, run_filter=[]):
         if analysis_prefix:
-            analysis_prefix = '.' + analysis_prefix
+            analysis_prefix = analysis_prefix + '.'
 
         output_dir_path = os.path.join(self.project.project_dir, self.name, 'barcode_fastq')
         self.project.project_check_dir(output_dir_path)
@@ -699,9 +699,10 @@ class IndropsLibrary():
 
     def quantify_expression(self, analysis_prefix='', max_reads=10**10, min_reads=750, min_counts=0, total_workers=1, worker_index=0, no_bam=False, run_filter=[]):
         if analysis_prefix:
-            analysis_prefix = '.' + analysis_prefix
+            analysis_prefix = analysis_prefix + '.'
 
         sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads, max_reads=max_reads)
+        #print_to_stderr("   min_reads: %d sorted_barcode_names counts: %d" % (min_reads, len(sorted_barcode_names)))
 
         # Identify which barcodes belong to this worker
         barcodes_for_this_worker = []
@@ -989,9 +990,11 @@ class IndropsLibrary():
 
     def aggregate_counts(self, analysis_prefix='', process_ambiguity_data=False):
         if analysis_prefix:
-            analysis_prefix = '.' + analysis_prefix
+            analysis_prefix = analysis_prefix + '.'
+            quant_output_files = [fn[len(analysis_prefix):].split('.')[0] for fn in os.listdir(self.paths.quant_dir) if ('worker' in fn and fn[:len(analysis_prefix)]==analysis_prefix)]
+        else:
+            quant_output_files = [fn.split('.')[0] for fn in os.listdir(self.paths.quant_dir) if (fn[:6]=='worker')]
         
-        quant_output_files = [fn[len(analysis_prefix):].split('.')[0] for fn in os.listdir(self.paths.quant_dir) if ('worker' in fn and fn[:len(analysis_prefix)]==analysis_prefix)]
         worker_names = [w[6:] for w in quant_output_files]
         worker_indices = set(int(w.split('_')[0]) for w in worker_names)
 
@@ -1008,13 +1011,13 @@ class IndropsLibrary():
             missing_workers = ','.join([str(i) for i in sorted(missing_workers)])
             raise Exception("""Output from workers %s (total %d) is missing. """ % (missing_workers, total_workers))
 
-        aggregated_counts_filename = os.path.join(self.project.project_dir, self.name, self.name+analysis_prefix+'.counts.tsv')
-        aggregated_quant_metrics_filename = os.path.join(self.project.project_dir, self.name, self.name+analysis_prefix+'.quant_metrics.tsv')
-        aggregated_ignored_filename = os.path.join(self.project.project_dir, self.name, self.name+analysis_prefix+'.ignored_barcodes.txt')
-        aggregated_bam_output = os.path.join(self.project.project_dir, self.name, self.name+analysis_prefix+'.bam')
+        aggregated_counts_filename = os.path.join(self.project.project_dir, self.name, self.name+'.'+analysis_prefix+'counts.tsv')
+        aggregated_quant_metrics_filename = os.path.join(self.project.project_dir, self.name, self.name+'.'+analysis_prefix+'quant_metrics.tsv')
+        aggregated_ignored_filename = os.path.join(self.project.project_dir, self.name, self.name+'.'+analysis_prefix+'ignored_barcodes.txt')
+        aggregated_bam_output = os.path.join(self.project.project_dir, self.name, self.name+'.'+analysis_prefix+'bam')
 
-        aggregated_ambig_counts_filename = os.path.join(self.project.project_dir, self.name, self.name+analysis_prefix+'.ambig_counts.tsv')
-        aggregated_ambig_partners_filename = os.path.join(self.project.project_dir, self.name, self.name+analysis_prefix+'.ambig_partners.tsv')
+        aggregated_ambig_counts_filename = os.path.join(self.project.project_dir, self.name, self.name+'.'+analysis_prefix+'ambig_counts.tsv')
+        aggregated_ambig_partners_filename = os.path.join(self.project.project_dir, self.name, self.name+'.'+analysis_prefix+'ambig_partners.tsv')
 
         agg_counts = open(aggregated_counts_filename, mode='w')
         agg_metrics = open(aggregated_quant_metrics_filename, mode='w')
@@ -1248,7 +1251,7 @@ class LibrarySequencingPart():
             with FIFO(dir=filtered_dir) as fifo1:
 
                 trimmomatic_cmd = [self.project.paths.java, '-Xmx500m', '-jar', self.project.paths.trimmomatic_jar,
-                        'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
+                        'SE', '-threads', "6", '-phred33', fifo1.filename, fifo2.filename]
                 for arg in self.project.parameters['trimmomatic_arguments']['argument_order']:
                     val = self.project.parameters['trimmomatic_arguments'][arg]
                     trimmomatic_cmd.append('%s:%s' % (arg, val))
@@ -1765,7 +1768,7 @@ if __name__=="__main__":
                     del part._sorted_index
 
     elif args.command == 'aggregate':
-        for library in worker_filter(target_libraries, args.worker_index, args.total_workers):
+        for library in target_libraries:
             project.libraries[library].aggregate_counts(analysis_prefix=args.analysis_prefix)
 
     elif args.command == 'build_index':
