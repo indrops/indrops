@@ -24,7 +24,6 @@ from itertools import product, combinations
 import time
 
 import yaml
-import pysam
 
 import tempfile
 import string
@@ -196,7 +195,7 @@ class FIFO():
 
 class IndropsProject():
 
-    def __init__(self, project_yaml_file_handle):
+    def __init__(self, project_yaml_file_handle, read_only=False):
 
         self.yaml = yaml.load(project_yaml_file_handle)
 
@@ -205,6 +204,8 @@ class IndropsProject():
 
         self.libraries = OrderedDict()
         self.runs = OrderedDict()
+
+        self.read_only = read_only
 
         for run in self.yaml['sequencing_runs']:
             """
@@ -379,6 +380,10 @@ class IndropsProject():
             }
         return self._stable_barcode_names
 
+    def project_check_dir(self, path):
+        if not self.read_only:
+            check_dir(path)
+
     def filter_gtf(self, gzipped_transcriptome_gtf, gtf_with_genenames_in_transcript_id):
 
         # A small number of gene are flagged as having two different biotypes.
@@ -455,7 +460,7 @@ class IndropsProject():
         import pyfasta
         
         index_dir = os.path.dirname(self.paths.bowtie_index)
-        check_dir(index_dir)
+        self.project_check_dir(index_dir)
 
         genome_filename = os.path.join(index_dir, '.'.join(gzipped_genome_softmasked_fasta_filename.split('.')[:-1]))
 
@@ -526,7 +531,6 @@ class IndropsProject():
         with open(self.paths.bowtie_index + '.soft_masked_regions.pickle', 'w') as out:
             pickle.dump(soft_mask, out)
 
-
 class IndropsLibrary():
 
     def __init__(self, name='', project=None, version=''):
@@ -538,7 +542,7 @@ class IndropsLibrary():
         self.paths = {}
         for lib_dir in ['filtered_parts', 'quant_dir']:
             dir_path = os.path.join(self.project.project_dir, self.name, lib_dir)
-            check_dir(dir_path)
+            self.project.project_check_dir(dir_path)
             self.paths[lib_dir] = dir_path
         self.paths = type('Paths_anonymous_object',(object,),self.paths)()
 
@@ -673,7 +677,7 @@ class IndropsLibrary():
             analysis_prefix = '.' + analysis_prefix
 
         output_dir_path = os.path.join(self.project.project_dir, self.name, 'barcode_fastq')
-        check_dir(output_dir_path)
+        self.project.project_check_dir(output_dir_path)
 
         sorted_barcode_names = self.sorted_barcode_names(min_reads=min_reads, max_reads=max_reads)
 
@@ -1098,7 +1102,7 @@ class IndropsLibrary():
 
         #     ignored_for_output_filename = counts_output_filename+'.ignored'
         #     os.remove(ignored_for_output_filename)
-        
+
 
 class LibrarySequencingPart():
     def __init__(self, filtered_fastq_filename=None, project=None, run_name='', library_name='', part_name=''):
@@ -1499,10 +1503,10 @@ class V3Demultiplexer():
     def _weave_fastqs(self, fastqs):
         last_extension = [fn.split('.')[-1] for fn in fastqs]
         if all(ext == 'gz' for ext in last_extension):
-            processes = [subprocess.Popen("gzip --stdout -d %s" % (fn), shell=True, stdout=subprocess.PIPE) for fn in fastqs]
+            processes = [subprocess.Popen("gzip --stdout -d %s" % (fn), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for fn in fastqs]
             streams = [r.stdout for r in processes]
         elif all(ext == 'bz2' for ext in last_extension):
-            processes = [subprocess.Popen("bzcat %s" % (fn), shell=True, stdout=subprocess.PIPE) for fn in fastqs]
+            processes = [subprocess.Popen("bzcat %s" % (fn), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for fn in fastqs]
             streams = [r.stdout for r in processes]
         elif all(ext == 'fastq' for ext in last_extension):
             streams = [open(fn, 'r') for fn in fastqs]
@@ -1514,6 +1518,12 @@ class V3Demultiplexer():
             seqs = [next(s)[:-1] for s in streams]
             blanks = [next(s)[:-1]  for s in streams]
             quals = [next(s)[:-1]  for s in streams]
+
+            for pp in processes:
+                p_err = pp.stderr.read()
+                if p_err:
+                    print_to_stderr(p_err)
+
             assert all(name==names[0] for name in names)
             yield names[0], seqs, quals
 
@@ -1654,6 +1664,8 @@ class V3Demultiplexer():
             if lib.contains_library_in_query(query_libraries):
                 return True
         return False
+
+
 
 
 
