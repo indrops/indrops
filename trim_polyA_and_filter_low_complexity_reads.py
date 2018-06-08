@@ -28,7 +28,7 @@ def low_complexity_filter(args):
             polyA_length += 1
 
         read_length = len(seq)
-        trim_at_position = read_length - min(polyA_length + keep_polyA_length, 0)
+        trim_at_position = read_length - max(polyA_length - keep_polyA_length, 0)  
 
         if trim_at_position < args.min_post_trim_length:
             keep_read = False
