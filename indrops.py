@@ -1251,7 +1251,7 @@ class LibrarySequencingPart():
             with FIFO(dir=filtered_dir) as fifo1:
 
                 trimmomatic_cmd = [self.project.paths.java, '-Xmx500m', '-jar', self.project.paths.trimmomatic_jar,
-                        'SE', '-threads', "6", '-phred33', fifo1.filename, fifo2.filename]
+                        'SE', '-threads', "1", '-phred33', fifo1.filename, fifo2.filename]
                 for arg in self.project.parameters['trimmomatic_arguments']['argument_order']:
                     val = self.project.parameters['trimmomatic_arguments'][arg]
                     trimmomatic_cmd.append('%s:%s' % (arg, val))
