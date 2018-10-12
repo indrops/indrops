@@ -154,6 +154,13 @@ If no index exists, it needs to be built
         --genome-fasta-gz DOWNLOAD_DIR/Mus_musculus.GRCm38.dna_sm.primary_assembly.fa.gz \
         --ensembl-gtf-gz DOWNLOAD_DIR/Mus_musculus.GRCm38.85.gtf.gz
 
+#### Example creation of a non ENSEMBLE based genome index
+    # Let's assume the genome folder is GENOME, and that in the folder there is genome.fa containing the genome sequence, and an annotation.gff3 containing the annotations. 
+    cd GENOME
+    mkdir index
+    cd index
+    rsem-prepare-reference --gff3 ../annotations.gff3 --gff3-RNA-patterns mRNA,rRNA --bowtie --polyA --polyA-length 5 --bowtie-path PATH_TO_BOWTIE_1 ../genome.fa GENOME/index/NAME
+
 
 ### 1. Filter
 This iterates over sequencing run parts, optionally filtered by a list of sequencing parts, and a list of libraries of interest.
