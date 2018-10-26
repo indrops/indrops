@@ -1522,11 +1522,6 @@ class V3Demultiplexer():
             blanks = [next(s)[:-1]  for s in streams]
             quals = [next(s)[:-1]  for s in streams]
 
-            for pp in processes:
-                p_err = pp.stderr.read()
-                if p_err:
-                    print_to_stderr(p_err)
-
             assert all(name==names[0] for name in names)
             yield names[0], seqs, quals
 
